@@ -73,6 +73,15 @@ export class FrontendPty {
   private static readonly MAX_BACKLOG_BYTES = 8 * 1024 * 1024;
   /** True once backlog overflow forced us to drop output → reset xterm before flush. */
   private backlogTruncated = false;
+  // ── PTY output-burst diagnostics ──────────────────────────────────────────
+  // A large burst of output into the active terminal (e.g. an agent dumping a
+  // file/image back after a paste) is the prime suspect for the memory spikes.
+  // Record one diagnostic per window when throughput crosses the threshold.
+  private burstBytes = 0;
+  private burstStartedAt = 0;
+  private burstReported = false;
+  private static readonly BURST_WINDOW_MS = 2000;
+  private static readonly BURST_THRESHOLD_BYTES = 2 * 1024 * 1024;
   /** Last { cols, rows } sent to rpc.pty.resize(). Used by PaneSizingContext to skip redundant IPC calls. */
   lastSentDims: { cols: number; rows: number } | null = null;
 
@@ -155,6 +164,7 @@ export class FrontendPty {
     this.offData = events.on(
       ptyDataChannel,
       (data: string) => {
+        this.trackOutputBurst(data.length);
         if (this.active) {
           this.terminal.write(data);
         } else {
@@ -182,6 +192,35 @@ export class FrontendPty {
       const dropped = this.backlog.shift();
       if (dropped) this.backlogBytes -= dropped.length;
       this.backlogTruncated = true;
+    }
+  }
+
+  /**
+   * Diagnostic: detect a large burst of PTY output (the suspected trigger for
+   * the renderer memory spikes — e.g. an agent echoing an image/file). Fires at
+   * most once per window, recorded to the process-health log for correlation.
+   */
+  private trackOutputBurst(len: number): void {
+    const now = Date.now();
+    if (now - this.burstStartedAt > FrontendPty.BURST_WINDOW_MS) {
+      this.burstStartedAt = now;
+      this.burstBytes = 0;
+      this.burstReported = false;
+    }
+    this.burstBytes += len;
+    if (!this.burstReported && this.burstBytes >= FrontendPty.BURST_THRESHOLD_BYTES) {
+      this.burstReported = true;
+      const bytes = this.burstBytes;
+      void rpc.processHealth
+        .record({
+          kind: 'pty_burst',
+          sessionId: this.sessionId,
+          bytes_in_window: bytes,
+          window_ms: FrontendPty.BURST_WINDOW_MS,
+          active: this.active,
+          scrollback_lines: this.terminal.buffer.active.length,
+        })
+        .catch(() => {});
     }
   }
 

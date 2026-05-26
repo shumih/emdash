@@ -24,8 +24,8 @@ import { telemetryService } from '@main/lib/telemetry';
 // Watchdog cadence is adaptive: cheap polling while healthy, but once memory
 // enters a warning band we poll fast so the final ramp toward OOM (which can
 // go from ~2GB to crash in well under 30s) is captured at high resolution.
-const WATCHDOG_HEALTHY_INTERVAL_MS = 30_000;
-const WATCHDOG_ELEVATED_INTERVAL_MS = 5_000;
+const WATCHDOG_HEALTHY_INTERVAL_MS = 10_000;
+const WATCHDOG_ELEVATED_INTERVAL_MS = 2_000;
 
 // Renderer working-set thresholds. The observed OOM crashes peaked ~3.2 GB, so
 // we warn well before that and escalate as it approaches the danger zone.
@@ -263,4 +263,13 @@ export function stopProcessHealthMonitor(): void {
     clearTimeout(watchdogTimer);
     watchdogTimer = null;
   }
+}
+
+/**
+ * Append a diagnostic record to the health log from elsewhere (e.g. the
+ * renderer via RPC). Used to correlate user actions (image paste, large PTY
+ * output bursts) with the memory/CPU spikes the watchdog samples.
+ */
+export function recordHealthEvent(record: HealthRecord): void {
+  appendRecord(record);
 }
