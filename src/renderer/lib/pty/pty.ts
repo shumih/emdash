@@ -7,17 +7,7 @@ import { ptyDataChannel } from '@shared/events/ptyEvents';
 import { buildTerminalFontFamily } from './terminal-font';
 import { ensureXtermHost } from './xterm-host';
 
-/*
- * xterm keeps the full scrollback in renderer memory for the entire lifetime of
- * a session (sessions are disposed only on tab close / task deletion, not when
- * switched away). At ~120 cols a filled line costs ~1.5KB, so every viewed chat
- * or terminal can pin >100MB at 100k lines — with several open agent sessions
- * that is the multi-GB renderer growth that drives the OOM crashes. The main
- * process only retains a 64KB ring buffer per session, so a 100k renderer
- * scrollback was never restorable on reconnect anyway. 10k lines stays generous
- * while capping the per-session ceiling ~10x.
- */
-const SCROLLBACK_LINES = 10_000;
+const SCROLLBACK_LINES = 100_000;
 
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
@@ -69,6 +59,20 @@ export class FrontendPty {
   readonly ownedContainer: HTMLDivElement;
   private theme?: SessionTheme;
   private offData: (() => void) | null = null;
+  /**
+   * Whether this terminal is currently mounted in the visible DOM. Live PTY
+   * output is only parsed into xterm while active; while parked off-screen we
+   * buffer raw output (cheap) and flush it on remount. This keeps the main
+   * thread from parsing+rendering output for terminals the user can't see —
+   * the cause of the UI hang with several streaming background agents.
+   */
+  private active = true;
+  private backlog: string[] = [];
+  private backlogBytes = 0;
+  /** Drop the oldest buffered output past this; the user has RAM, but not infinite. */
+  private static readonly MAX_BACKLOG_BYTES = 8 * 1024 * 1024;
+  /** True once backlog overflow forced us to drop output → reset xterm before flush. */
+  private backlogTruncated = false;
   /** Last { cols, rows } sent to rpc.pty.resize(). Used by PaneSizingContext to skip redundant IPC calls. */
   lastSentDims: { cols: number; rows: number } | null = null;
 
@@ -151,7 +155,11 @@ export class FrontendPty {
     this.offData = events.on(
       ptyDataChannel,
       (data: string) => {
-        this.terminal.write(data);
+        if (this.active) {
+          this.terminal.write(data);
+        } else {
+          this.bufferWhileInactive(data);
+        }
       },
       this.sessionId
     );
@@ -162,7 +170,39 @@ export class FrontendPty {
    * If targetDims are provided the terminal is resized BEFORE the appendChild
    * to eliminate the flash caused by a post-mount resize.
    */
+  /**
+   * Buffer raw PTY output while the terminal is parked off-screen instead of
+   * parsing it into xterm. Bounded so a runaway background stream can't grow
+   * without limit; on overflow we drop the oldest bytes and reset on flush.
+   */
+  private bufferWhileInactive(data: string): void {
+    this.backlog.push(data);
+    this.backlogBytes += data.length;
+    while (this.backlogBytes > FrontendPty.MAX_BACKLOG_BYTES && this.backlog.length > 1) {
+      const dropped = this.backlog.shift();
+      if (dropped) this.backlogBytes -= dropped.length;
+      this.backlogTruncated = true;
+    }
+  }
+
+  /** Write everything buffered while inactive into xterm in a single batch. */
+  private flushBacklog(): void {
+    if (this.backlog.length === 0) return;
+    const pending = this.backlog.join('');
+    this.backlog = [];
+    this.backlogBytes = 0;
+    // If we had to drop output, the buffer is no longer continuous with what's
+    // on screen — reset so the user sees a clean, current view rather than a
+    // torn one. Otherwise append, preserving existing scrollback.
+    if (this.backlogTruncated) {
+      this.backlogTruncated = false;
+      this.terminal.reset();
+    }
+    this.terminal.write(pending);
+  }
+
   mount(mountTarget: HTMLElement, targetDims?: { cols: number; rows: number }): void {
+    this.active = true;
     if (
       targetDims &&
       (this.terminal.cols !== targetDims.cols || this.terminal.rows !== targetDims.rows)
@@ -170,6 +210,9 @@ export class FrontendPty {
       this.terminal.resize(targetDims.cols, targetDims.rows);
     }
     mountTarget.appendChild(this.ownedContainer);
+    // Catch up on output that streamed while this terminal was off-screen,
+    // now that it's sized and in the visible DOM.
+    this.flushBacklog();
     // Force a Canvas2D repaint after reparenting in the DOM.
     const t = this.terminal;
     requestAnimationFrame(() => {
@@ -186,6 +229,8 @@ export class FrontendPty {
    * the visible mount target have been disconnected.
    */
   unmount(): void {
+    // Going off-screen: stop parsing live output into xterm; buffer it instead.
+    this.active = false;
     ensureXtermHost().appendChild(this.ownedContainer);
   }
 
@@ -198,6 +243,8 @@ export class FrontendPty {
     FrontendPty.all.delete(this);
     this.offData?.();
     this.offData = null;
+    this.backlog = [];
+    this.backlogBytes = 0;
     rpc.pty.unsubscribe(this.sessionId).catch(() => {});
     try {
       this.terminal.dispose();
