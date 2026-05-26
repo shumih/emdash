@@ -572,12 +572,14 @@ export class TabManagerStore implements Snapshottable<TabManagerSnapshot> {
       void this._closeHandler(id).then(() => {
         if (conversationId && !this.entries.has(id)) {
           this._markConversationSeen(conversationId);
+          this._disconnectConversationSession(conversationId);
         }
       });
     } else {
       this._removeTab(id);
       if (conversationId) {
         this._markConversationSeen(conversationId);
+        this._disconnectConversationSession(conversationId);
       }
     }
   }
@@ -760,5 +762,15 @@ export class TabManagerStore implements Snapshottable<TabManagerSnapshot> {
 
   private _markConversationSeen(conversationId: string): void {
     this._getConversations()?.conversations.get(conversationId)?.markSeen();
+  }
+
+  /**
+   * Free the renderer-side xterm for a conversation whose tab the user just
+   * closed. Only reached from closeTabWithGuard (explicit UI/keyboard close) —
+   * never from tab moves between groups, which use closeTab and reuse the same
+   * session. The conversation record is kept; reopening reconnects lazily.
+   */
+  private _disconnectConversationSession(conversationId: string): void {
+    this._getConversations()?.disconnectSession(conversationId);
   }
 }

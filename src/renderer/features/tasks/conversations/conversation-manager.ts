@@ -232,6 +232,18 @@ export class ConversationManagerStore implements IDisposable {
     }
   }
 
+  /**
+   * Free the renderer-side terminal (xterm) for a conversation whose tab the
+   * user closed, while keeping the conversation record. The PtySession stays in
+   * the map and reconnects lazily (replaying the main-process ring buffer) the
+   * next time the chat is reopened. This is the seam that bounds renderer
+   * memory: without it, every viewed chat keeps a live 100k-line xterm alive
+   * until the whole task is deleted.
+   */
+  disconnectSession(conversationId: string): void {
+    this.sessions.get(conversationId)?.dispose();
+  }
+
   async renameConversation(conversationId: string, name: string): Promise<void> {
     const store = this.conversations.get(conversationId);
     if (!store) return;

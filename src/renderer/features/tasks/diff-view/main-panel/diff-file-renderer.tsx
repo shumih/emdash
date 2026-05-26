@@ -23,6 +23,12 @@ interface DiffFileRendererProps {
   tab: DiffTabStore;
 }
 
+// Monaco's diff editor renders the full content of both sides, so total model line
+// count — not just changed lines — drives memory use. Past this many lines a single
+// diff can blow up the renderer heap (GC thrash → frozen UI), so we gate it behind a
+// confirm, mirroring the stacked diff view's large-diff guard.
+const LARGE_DIFF_LINE_THRESHOLD = 20000;
+
 /**
  * Routes a diff tab to the correct renderer based on its renderer kind.
  * Mirrors the FileRenderer pattern for file tabs.
@@ -65,6 +71,7 @@ const MonacoDiffRenderer = observer(function MonacoDiffRenderer({ tab }: DiffFil
   const draftComments = getTaskStore(projectId, taskId)?.draftComments;
 
   const [editor, setEditor] = useState<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const [forceLoad, setForceLoad] = useState(false);
 
   const commentTarget = diffTabToCommentTarget(tab);
   const commentTargetKey = getDraftCommentTargetKey(commentTarget);
@@ -217,17 +224,54 @@ const MonacoDiffRenderer = observer(function MonacoDiffRenderer({ tab }: DiffFil
     uri,
   ]);
 
+  // Re-arm the large-diff guard whenever the file (URIs) changes.
+  useEffect(() => {
+    setForceLoad(false);
+  }, [originalUri, modifiedUri]);
+
+  // Read model readiness + size reactively (observer): only mount the heavy diff
+  // editor once both models are ready, and only if the diff is not pathologically
+  // large (or the user explicitly opted in via "Load anyway").
+  const originalStatus = modelRegistry.modelStatus.get(originalUri);
+  const modifiedStatus = modelRegistry.modelStatus.get(modifiedUri);
+  const modelsReady = originalStatus === 'ready' && modifiedStatus === 'ready';
+  const maxModelLines = modelsReady
+    ? Math.max(
+        modelRegistry.getModelByUri(originalUri)?.getLineCount() ?? 0,
+        modelRegistry.getModelByUri(modifiedUri)?.getLineCount() ?? 0
+      )
+    : 0;
+  const isLargeDiff = maxModelLines > LARGE_DIFF_LINE_THRESHOLD;
+
   if (!diffView) return null;
 
   return (
     <div className="file-diff-view flex h-full flex-col">
       <div className="relative min-h-0 flex-1">
-        <StickyDiffEditor
-          originalUri={originalUri}
-          modifiedUri={modifiedUri}
-          diffStyle={diffView.diffStyle}
-          onEditorChange={setEditor}
-        />
+        {modelsReady && isLargeDiff && !forceLoad ? (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-foreground-passive">
+            <span>
+              Large diff ({maxModelLines.toLocaleString()} lines). Loading may freeze the UI.
+            </span>
+            <button
+              className="rounded-md border border-border px-3 py-1 text-xs font-medium hover:bg-background-1"
+              onClick={() => setForceLoad(true)}
+            >
+              Load anyway
+            </button>
+          </div>
+        ) : modelsReady ? (
+          <StickyDiffEditor
+            originalUri={originalUri}
+            modifiedUri={modifiedUri}
+            diffStyle={diffView.diffStyle}
+            onEditorChange={setEditor}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm text-foreground-passive">
+            Loading diff…
+          </div>
+        )}
       </div>
     </div>
   );
