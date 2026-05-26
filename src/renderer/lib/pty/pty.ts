@@ -7,7 +7,17 @@ import { ptyDataChannel } from '@shared/events/ptyEvents';
 import { buildTerminalFontFamily } from './terminal-font';
 import { ensureXtermHost } from './xterm-host';
 
-const SCROLLBACK_LINES = 100_000;
+/*
+ * xterm keeps the full scrollback in renderer memory for the entire lifetime of
+ * a session (sessions are disposed only on tab close / task deletion, not when
+ * switched away). At ~120 cols a filled line costs ~1.5KB, so every viewed chat
+ * or terminal can pin >100MB at 100k lines — with several open agent sessions
+ * that is the multi-GB renderer growth that drives the OOM crashes. The main
+ * process only retains a 64KB ring buffer per session, so a 100k renderer
+ * scrollback was never restorable on reconnect anyway. 10k lines stays generous
+ * while capping the per-session ceiling ~10x.
+ */
+const SCROLLBACK_LINES = 10_000;
 
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
