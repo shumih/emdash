@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import dockIcon from '@/assets/images/emdash/icon-dock.png?asset';
-import { PRODUCT_NAME } from '@shared/app-identity';
+import { APP_NAME_LOWER, PRODUCT_NAME } from '@shared/app-identity';
 import { registerRPCRouter } from '@shared/ipc/rpc';
 import { setupApplicationMenu } from './app/menu';
 import { registerAppScheme, setupAppProtocol } from './app/protocol';
@@ -45,7 +45,10 @@ if (process.platform === 'linux') {
 registerAppScheme();
 
 app.setName(PRODUCT_NAME);
-app.setPath('userData', join(app.getPath('appData'), 'emdash'));
+// Use the app-specific data dir so the build gets its own profile and single-instance
+// lock. Sharing Emdash's dir collides with its Chromium SingletonLock (which can be
+// stale / owned by another hostname), making requestSingleInstanceLock() fail → silent exit.
+app.setPath('userData', join(app.getPath('appData'), APP_NAME_LOWER));
 
 app.on('second-instance', () => {
   const win = BrowserWindow.getAllWindows()[0];
