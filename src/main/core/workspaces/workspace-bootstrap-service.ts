@@ -30,15 +30,21 @@ export class WorkspaceBootstrapService {
     let workspaceId: string;
 
     if (!rawWorkspaceId || this._isLegacyWorkspaceId(rawWorkspaceId)) {
-      workspaceId = await this._migrateLegacyWorkspaceId(taskId, taskRow, rawWorkspaceId, ctx);
+      workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
     } else {
       workspaceId = rawWorkspaceId;
     }
 
-    const [workspace] = await this.db
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, workspaceId));
+    let [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+
+    // Dangling reference: the task points at a workspace row that no longer
+    // exists (e.g. the workspace was deleted out from under it). Recover by
+    // provisioning a fresh workspace instead of failing to open the task.
+    if (!workspace) {
+      workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
+      [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+    }
+
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
 
     if (workspace.type === 'byoi') {
@@ -206,7 +212,12 @@ export class WorkspaceBootstrapService {
     return id.startsWith('local:') || id.startsWith('ssh:') || id.startsWith('remote:');
   }
 
-  private async _migrateLegacyWorkspaceId(
+  /**
+   * Creates a new workspace row and re-points the task to it. Used both to
+   * migrate legacy (prefixed) workspace IDs and to recover tasks whose
+   * workspace row has gone missing.
+   */
+  private async _provisionFreshWorkspace(
     taskId: string,
     taskRow: { workspaceProvider?: string | null; workspaceId?: string | null },
     rawWorkspaceId: string | null | undefined,

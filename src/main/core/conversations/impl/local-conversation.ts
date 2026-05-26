@@ -29,6 +29,12 @@ import { resolveProviderEnv } from './provider-env';
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_RESPAWNS = 2;
+/**
+ * A resumed session that dies within this window almost certainly failed to
+ * start (the provider has no transcript for the session id) rather than having
+ * run and exited. Used to decide when to fall back to a fresh session.
+ */
+const RESUME_FAILURE_WINDOW_MS = 3000;
 
 export class LocalConversationProvider implements ConversationProvider {
   private sessions = new Map<string, Pty>();
@@ -37,6 +43,7 @@ export class LocalConversationProvider implements ConversationProvider {
   private readonly projectId: string;
   private readonly taskPath: string;
   private readonly taskId: string;
+  private readonly taskName: string;
   private readonly tmux: boolean;
   private readonly shellSetup?: string;
   private readonly ctx: IExecutionContext;
@@ -51,6 +58,7 @@ export class LocalConversationProvider implements ConversationProvider {
     projectId,
     taskPath,
     taskId,
+    taskName,
     tmux = false,
     shellSetup,
     ctx,
@@ -59,6 +67,7 @@ export class LocalConversationProvider implements ConversationProvider {
     projectId: string;
     taskPath: string;
     taskId: string;
+    taskName: string;
     tmux?: boolean;
     shellSetup?: string;
     ctx: IExecutionContext;
@@ -67,6 +76,7 @@ export class LocalConversationProvider implements ConversationProvider {
     this.projectId = projectId;
     this.taskPath = taskPath;
     this.taskId = taskId;
+    this.taskName = taskName;
     this.tmux = tmux;
     this.shellSetup = shellSetup;
     this.ctx = ctx;
@@ -102,6 +112,7 @@ export class LocalConversationProvider implements ConversationProvider {
       providerConfig,
       autoApprove: conversation.autoApprove,
       sessionId: conversation.id,
+      sessionName: this.taskName,
       isResuming,
       initialPrompt,
     });
@@ -169,6 +180,7 @@ export class LocalConversationProvider implements ConversationProvider {
       });
     }
 
+    const spawnedAt = Date.now();
     pty.onExit(({ exitCode }) => {
       ptySessionRegistry.unregister(sessionId);
       const shouldRespawn = this.sessions.has(sessionId);
@@ -180,30 +192,45 @@ export class LocalConversationProvider implements ConversationProvider {
         taskId: conversation.taskId,
         exitCode,
       });
-      if (shouldRespawn && !this.tmux) {
-        const count = (this.respawnCounts.get(sessionId) ?? 0) + 1;
-        this.respawnCounts.set(sessionId, count);
 
-        if (count > MAX_RESPAWNS && !isResuming) {
+      if (!shouldRespawn || this.tmux) return;
+
+      let resumeNext: boolean;
+      if (isResuming && Date.now() - spawnedAt < RESUME_FAILURE_WINDOW_MS) {
+        /*
+         * --resume failed: the provider has no transcript for this session id
+         * (its store was cleared, or the id was never persisted — e.g. a crash
+         * before the first turn). Retrying --resume can never succeed, so fall
+         * back to a fresh session that reuses the same session id. The task
+         * stays usable and a new transcript is written under the same id.
+         */
+        log.warn('LocalConversationProvider: resume failed, starting fresh session', {
+          conversationId: conversation.id,
+          exitCode,
+        });
+        this.respawnCounts.delete(sessionId);
+        resumeNext = false;
+      } else {
+        const count = (this.respawnCounts.get(sessionId) ?? 0) + 1;
+        if (count > MAX_RESPAWNS) {
           log.error('LocalConversationProvider: respawn limit reached, giving up', {
             conversationId: conversation.id,
           });
           this.respawnCounts.delete(sessionId);
           return;
         }
-
-        const resumeNext = isResuming && count <= MAX_RESPAWNS;
-        if (count > MAX_RESPAWNS) this.respawnCounts.set(sessionId, 0);
-
-        setTimeout(() => {
-          this.startSession(conversation, initialSize, resumeNext, initialPrompt).catch((e) => {
-            log.error('LocalConversationProvider: respawn failed', {
-              conversationId: conversation.id,
-              error: String(e),
-            });
-          });
-        }, 500);
+        this.respawnCounts.set(sessionId, count);
+        resumeNext = isResuming;
       }
+
+      setTimeout(() => {
+        this.startSession(conversation, initialSize, resumeNext, initialPrompt).catch((e) => {
+          log.error('LocalConversationProvider: respawn failed', {
+            conversationId: conversation.id,
+            error: String(e),
+          });
+        });
+      }, 500);
     });
 
     ptySessionRegistry.register(sessionId, pty, {
