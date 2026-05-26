@@ -289,7 +289,10 @@ describe('resolveSshConnectConfig', () => {
       })
     );
 
-    expect(readFiles).toEqual([expect.stringContaining('/.ssh/corp_ed25519.pub')]);
+    expect(readFiles).toEqual([
+      expect.stringContaining('/.ssh/corp_ed25519.pub'),
+      expect.stringMatching(/\/\.ssh\/corp_ed25519$/),
+    ]);
     expect(result.config.agent).toEqual(
       expect.objectContaining({ kind: 'identity-filtered-agent' })
     );
@@ -316,6 +319,60 @@ describe('resolveSshConnectConfig', () => {
         });
       })
     ).resolves.toBeInstanceOf(PassThrough);
+  });
+
+  it('falls back to the on-disk IdentityFile when the agent does not hold the key (IdentitiesOnly)', async () => {
+    // Mirrors a 1Password-style setup: IdentityAgent is configured but does not hold the
+    // IdentityFile key, so OpenSSH (and now we) authenticate with the on-disk private key.
+    const onDiskPrivateKey = [
+      '-----BEGIN OPENSSH PRIVATE KEY-----',
+      'b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW',
+      'QyNTUxOQAAACBoqtYONvkUkC+SHgsNNgHMSebI+b0iCzSEymCpGE2b8QAAAJCYXn2NmF59',
+      'jQAAAAtzc2gtZWQyNTUxOQAAACBoqtYONvkUkC+SHgsNNgHMSebI+b0iCzSEymCpGE2b8Q',
+      'AAAEAr+/wiBMhwTMpRbRkEZS5O4LMOE3X/dTEYr4RVPip6xWiq1g42+RSQL5IeCw02AcxJ',
+      '5sj5vSILNITKYKkYTZvxAAAAC2ZpeHR1cmUta2V5AQI=',
+      '-----END OPENSSH PRIVATE KEY-----',
+      '',
+    ].join('\n');
+
+    const result = await resolveSshConnectConfig(
+      {
+        kind: 'transient',
+        config: baseConfig({ sshConfigAlias: 'corp-dev', authType: 'agent' }),
+      },
+      deps({
+        // No `.pub` on disk; only the private key file is present.
+        readFile: async (path) => {
+          if (path.endsWith('.pub')) throw new Error('ENOENT');
+          return onDiskPrivateKey;
+        },
+        env: { SSH_AUTH_SOCK: '/tmp/default-agent.sock' },
+        // Agent offers no identities (it does not hold the IdentityFile key).
+        createAgent: () =>
+          ({
+            getIdentities: (callback) => callback(undefined, []),
+            sign: (_pubKey, _data, cbOrOpts?: SignCallback | object, cb?: SignCallback) => {
+              const done = typeof cbOrOpts === 'function' ? cbOrOpts : cb;
+              done?.(undefined, Buffer.from('signature'));
+            },
+          }) satisfies BaseAgent,
+        resolveSshConfig: async () => ({
+          hostname: 'dev.internal',
+          user: 'alice',
+          port: 22,
+          identityFile: ['~/.ssh/corp_ed25519'],
+          identityAgent: 'SSH_AUTH_SOCK',
+          identityAgentDisabled: false,
+          identitiesOnly: true,
+          proxyCommand: undefined,
+          proxyJump: undefined,
+          forwardAgent: false,
+        }),
+      })
+    );
+
+    // The on-disk key is offered directly so auth succeeds even though the agent lacks it.
+    expect(result.config.privateKey).toBe(onDiskPrivateKey);
   });
 
   it('does not expose agent getStream when the wrapped agent does not support it', async () => {

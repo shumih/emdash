@@ -40,7 +40,7 @@ export function AccountTab() {
         return;
       }
       toast({
-        title: 'Signed in to Emdash',
+        title: 'Signed in to Tondash',
         description: result.user ? `Connected as ${result.user.username}` : 'Signed in',
       });
     } catch (err) {
@@ -69,8 +69,8 @@ export function AccountTab() {
 
   const handleSignOut = () => {
     showConfirmSignOut({
-      title: 'Sign out of Emdash?',
-      description: 'You will need to sign in again to reconnect your Emdash account.',
+      title: 'Sign out of Tondash?',
+      description: 'You will need to sign in again to reconnect your Tondash account.',
       confirmLabel: 'Sign Out',
       variant: 'default',
       onSuccess: () => void performSignOut(),

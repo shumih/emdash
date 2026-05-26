@@ -36,11 +36,11 @@ const config: Configuration = {
       { target: 'dmg', arch: ['arm64'] },
       { target: 'zip', arch: ['arm64'] },
     ],
-    icon: 'src/assets/images/emdash/emdash-beta.icns',
+    icon: 'src/assets/images/tondash/tondash.icns',
     notarize: false,
   },
   dmg: {
-    icon: 'src/assets/images/emdash/emdash-beta.icns',
+    icon: 'src/assets/images/tondash/tondash.icns',
   },
   linux: {
     category: 'Development',
@@ -51,7 +51,7 @@ const config: Configuration = {
     ],
   },
   win: {
-    icon: 'src/assets/images/emdash/app-icon-beta.png',
+    icon: 'src/assets/images/tondash/app-icon.png',
     target: [
       { target: 'nsis', arch: ['x64'] },
       { target: 'msi', arch: ['x64'] },
