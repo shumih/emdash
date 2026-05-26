@@ -57,6 +57,15 @@ async function injectTerminalImagePaths(args: {
     ? 'linux'
     : ((await rpc.app.getPlatform()) as NodeJS.Platform);
   const payload = buildTerminalImageInjection(paths, platform);
+  void rpc.processHealth
+    .record({
+      kind: 'paste_inject_paths',
+      sessionId: args.sessionId,
+      remote: Boolean(args.remoteConnectionId),
+      path_count: paths.length,
+      payload_len: payload.length,
+    })
+    .catch(() => {});
   args.sendInput(`${payload} `, { track: false });
   args.focus();
 }
@@ -73,6 +82,16 @@ async function pasteClipboardImageOrText(args: {
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
+        // Suspect path: a clipboard image often also carries a large text/HTML
+        // (data-URL) representation; sending it verbatim floods the PTY/xterm.
+        void rpc.processHealth
+          .record({
+            kind: 'paste_text',
+            sessionId: args.sessionId,
+            source: 'preferText',
+            text_len: text.length,
+          })
+          .catch(() => {});
         args.sendInput(text);
         return;
       }
@@ -92,13 +111,33 @@ async function pasteClipboardImageOrText(args: {
   }
 
   if (args.fallbackText !== undefined) {
-    if (args.fallbackText) args.sendInput(args.fallbackText);
+    if (args.fallbackText) {
+      void rpc.processHealth
+        .record({
+          kind: 'paste_text',
+          sessionId: args.sessionId,
+          source: 'fallbackText',
+          text_len: args.fallbackText.length,
+        })
+        .catch(() => {});
+      args.sendInput(args.fallbackText);
+    }
     return;
   }
 
   try {
     const text = await navigator.clipboard.readText();
-    if (text) args.sendInput(text);
+    if (text) {
+      void rpc.processHealth
+        .record({
+          kind: 'paste_text',
+          sessionId: args.sessionId,
+          source: 'readTextFallback',
+          text_len: text.length,
+        })
+        .catch(() => {});
+      args.sendInput(text);
+    }
   } catch {
     // Clipboard read denied or unavailable.
   }
@@ -192,6 +231,16 @@ const PtyPaneComponent = forwardRef<{ focus: () => void }, Props>(
         const imageFiles = extractClipboardImageFiles(clipboardData);
         if (imageFiles.length > 0) {
           event.preventDefault();
+          void rpc.processHealth
+            .record({
+              kind: 'paste_image_files',
+              sessionId,
+              file_count: imageFiles.length,
+              total_bytes: imageFiles.reduce((n, f) => n + f.size, 0),
+              types: clipboardData?.types?.join(',') ?? '',
+              fallback_text_len: fallbackText.length,
+            })
+            .catch(() => {});
           void (async () => {
             try {
               const injected = await injectImageFiles(imageFiles);

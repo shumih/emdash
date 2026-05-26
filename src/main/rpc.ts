@@ -16,6 +16,7 @@ import { jiraController } from './core/jira/controller';
 import { linearController } from './core/linear/controller';
 import { mcpController } from './core/mcp/controller';
 import { plainController } from './core/plain/controller';
+import { processHealthController } from './core/process-health/controller';
 import { projectController } from './core/projects/controller';
 import { promptLibraryController } from './core/prompt-library/controller';
 import { ptyController } from './core/pty/controller';
@@ -47,6 +48,7 @@ export const rpcRouter = createRPCRouter({
   update: updateController,
   pty: ptyController,
   resourceMonitor: resourceMonitorController,
+  processHealth: processHealthController,
   asana: asanaController,
   featurebase: featurebaseController,
   forgejo: forgejoController,
