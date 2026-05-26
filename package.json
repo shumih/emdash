@@ -1,5 +1,5 @@
 {
-  "name": "emdash",
+  "name": "tondash",
   "version": "1.1.25",
   "description": "A cross-platform Electron app that orchestrates multiple coding agents in parallel",
   "keywords": [
