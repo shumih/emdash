@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { config as dotenvConfig } from 'dotenv';
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
-import dockIcon from '@/assets/images/emdash/icon-dock.png?asset';
+import dockIcon from '@/assets/images/tondash/icon-dock.png?asset';
 import { APP_NAME_LOWER, PRODUCT_NAME } from '@shared/app-identity';
 import { registerRPCRouter } from '@shared/ipc/rpc';
 import { setupApplicationMenu } from './app/menu';
