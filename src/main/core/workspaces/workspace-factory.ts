@@ -265,6 +265,7 @@ export function createWorkspaceFactory(
 type TaskProviderOpts = {
   projectId: string;
   taskId: string;
+  taskName: string;
   taskPath: string;
   tmuxEnabled: boolean;
   shellSetup?: string;
@@ -286,6 +287,7 @@ export function buildTaskProviders(
         projectId: opts.projectId,
         taskPath: opts.taskPath,
         taskId: opts.taskId,
+        taskName: opts.taskName,
         tmux: opts.tmuxEnabled,
         shellSetup: opts.shellSetup,
         ctx,
@@ -312,6 +314,7 @@ export function buildTaskProviders(
       projectId: opts.projectId,
       taskPath: opts.taskPath,
       taskId: opts.taskId,
+      taskName: opts.taskName,
       tmux: opts.tmuxEnabled,
       shellSetup: opts.shellSetup,
       ctx,

@@ -109,6 +109,7 @@ export function buildAgentCommand({
   autoApprove,
   initialPrompt,
   sessionId,
+  sessionName,
   isResuming,
 }: {
   providerId: AgentProviderId;
@@ -116,6 +117,7 @@ export function buildAgentCommand({
   autoApprove?: boolean;
   initialPrompt?: string;
   sessionId: string;
+  sessionName?: string;
   isResuming?: boolean;
 }): AgentCommand {
   const providerDef = getProvider(providerId);
@@ -137,6 +139,13 @@ export function buildAgentCommand({
     appendSessionId(args, sessionIdFlag, sessionId);
   } else if (!isResuming && providerDef?.newConversationFlag) {
     args.push(providerDef.newConversationFlag);
+  }
+
+  // Label the session with the task name so it's recognizable in the agent's
+  // own UI. Composes with both fresh starts and --resume.
+  const sessionNameValue = sessionName?.trim();
+  if (providerDef?.sessionNameFlag && sessionNameValue) {
+    appendSessionId(args, providerDef.sessionNameFlag, sessionNameValue);
   }
 
   if (autoApprove && providerConfig?.autoApproveFlag) {
@@ -169,6 +178,7 @@ export function buildAgentSessionCommand(args: {
   autoApprove?: boolean;
   initialPrompt?: string;
   sessionId: string;
+  sessionName?: string;
   isResuming?: boolean;
 }): AgentCommand {
   const command = buildAgentCommand(args);

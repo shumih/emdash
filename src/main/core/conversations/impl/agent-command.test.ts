@@ -224,6 +224,52 @@ describe('buildAgentCommand', () => {
     expect(result.args).toContain('Claude Sonnet');
   });
 
+  it('labels a fresh session with the task name via the provider name flag', () => {
+    const result = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: makeConfig(),
+      sessionId: 'conv-1',
+      sessionName: 'retro-agent',
+    });
+
+    expect(result.args).toEqual(['--session-id', 'conv-1', '--name', 'retro-agent']);
+  });
+
+  it('labels a resumed session with the task name too', () => {
+    const result = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: makeConfig(),
+      sessionId: 'conv-1',
+      sessionName: 'retro-agent',
+      isResuming: true,
+    });
+
+    expect(result.args).toEqual(['--resume', 'conv-1', '--name', 'retro-agent']);
+  });
+
+  it('omits the name flag when the task name is blank', () => {
+    const result = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: makeConfig(),
+      sessionId: 'conv-1',
+      sessionName: '   ',
+    });
+
+    expect(result.args).toEqual(['--session-id', 'conv-1']);
+  });
+
+  it('does not pass a name to providers without a name flag', () => {
+    const result = buildAgentCommand({
+      providerId: 'codex',
+      providerConfig: providerConfigDefaults.codex,
+      sessionId: 'conv-1',
+      sessionName: 'retro-agent',
+    });
+
+    expect(result.args).not.toContain('--name');
+    expect(result.args).not.toContain('retro-agent');
+  });
+
   it('rejects shell control syntax that makes managed args ambiguous', () => {
     expect(() =>
       buildAgentCommand({

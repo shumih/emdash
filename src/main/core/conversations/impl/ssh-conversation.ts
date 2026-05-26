@@ -32,6 +32,7 @@ export class SshConversationProvider implements ConversationProvider {
   private readonly projectId: string;
   private readonly taskPath: string;
   private readonly taskId: string;
+  private readonly taskName: string;
   private readonly taskEnvVars: Record<string, string>;
   private readonly tmux: boolean = false;
   private readonly shellSetup?: string;
@@ -42,6 +43,7 @@ export class SshConversationProvider implements ConversationProvider {
     projectId,
     taskPath,
     taskId,
+    taskName,
     taskEnvVars = {},
     tmux = false,
     shellSetup,
@@ -51,6 +53,7 @@ export class SshConversationProvider implements ConversationProvider {
     projectId: string;
     taskPath: string;
     taskId: string;
+    taskName: string;
     taskEnvVars?: Record<string, string>;
     tmux?: boolean;
     shellSetup?: string;
@@ -60,6 +63,7 @@ export class SshConversationProvider implements ConversationProvider {
     this.projectId = projectId;
     this.taskPath = taskPath;
     this.taskId = taskId;
+    this.taskName = taskName;
     this.taskEnvVars = taskEnvVars;
     this.tmux = tmux;
     this.shellSetup = shellSetup;
@@ -95,6 +99,7 @@ export class SshConversationProvider implements ConversationProvider {
       providerConfig,
       autoApprove: conversation.autoApprove,
       sessionId: conversation.id,
+      sessionName: this.taskName,
       isResuming,
       initialPrompt,
     });

@@ -197,6 +197,28 @@ describe('WorkspaceBootstrapService', () => {
       );
     });
 
+    it('recovers a dangling workspaceId (valid UUID, no workspace row) by provisioning a fresh workspace', async () => {
+      const danglingId = crypto.randomUUID();
+      await fixture.db.update(tasks).set({ workspaceId: danglingId }).where(eq(tasks.id, TASK_ID));
+
+      // No branch → fresh workspace has no path → needs_create, instead of throwing.
+      const result = await svc.resolveBootstrap(TASK_ID, makeCtx());
+      expect(result.kind).toBe('needs_create');
+
+      const [taskRow] = await fixture.db.select().from(tasks).where(eq(tasks.id, TASK_ID));
+      expect(taskRow.workspaceId).not.toBe(danglingId);
+      expect(taskRow.workspaceId).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+      );
+
+      // The new workspace row actually exists.
+      const [ws] = await fixture.db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.id, taskRow.workspaceId as string));
+      expect(ws).toBeTruthy();
+    });
+
     it('returns ready immediately for byoi workspace type', async () => {
       await fixture.db.update(workspaces).set({ type: 'byoi' }).where(eq(workspaces.id, WS_ID));
 
