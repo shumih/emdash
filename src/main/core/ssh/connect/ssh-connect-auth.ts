@@ -1,6 +1,5 @@
 // Auth assembly: password, key, and agent selection with IdentitiesOnly filtering.
 import ssh2, {
-  type BaseAgent,
   type ConnectConfig,
   type IdentityCallback,
   type ParsedKey,
@@ -15,7 +14,10 @@ import {
 } from '../config/resolve-ssh-config';
 import type { SshConnectDeps, SshConnectInput } from './resolve-ssh-connect-config';
 
-const { utils } = ssh2;
+// NOTE: `BaseAgent` must be pulled off the runtime namespace (not imported as a
+// type-only symbol). ssh2 gates custom agents with `agent instanceof BaseAgent`, so an
+// agent that only structurally implements the interface is silently discarded.
+const { utils, BaseAgent } = ssh2;
 
 export interface AuthResult {
   config: Partial<ConnectConfig>;
@@ -41,15 +43,16 @@ function comparablePublicKey(key: AgentPublicKey): ParsedKey | Buffer | string {
   return key;
 }
 
-class IdentityFilteredAgent implements BaseAgent {
+class IdentityFilteredAgent extends BaseAgent {
   readonly kind = 'identity-filtered-agent';
-  declare getStream?: BaseAgent['getStream'];
+  declare getStream?: InstanceType<typeof BaseAgent>['getStream'];
 
   constructor(
     readonly socketPath: string,
-    private readonly agent: BaseAgent,
+    private readonly agent: InstanceType<typeof BaseAgent>,
     private readonly allowedKeys: ParsedKey[]
   ) {
+    super();
     if (agent.getStream) {
       this.getStream = agent.getStream.bind(agent);
     }
@@ -99,6 +102,26 @@ async function readIdentityKeys(paths: string[], deps: SshConnectDeps): Promise<
     if (key) keys.push(key);
   }
   return keys;
+}
+
+/**
+ * Returns the contents of the first IdentityFile that holds a usable on-disk private key.
+ *
+ * OpenSSH with `IdentitiesOnly yes` signs with the configured IdentityFile directly when the
+ * agent does not hold that key. We mirror that by offering the on-disk key alongside the agent,
+ * so connections still succeed when the resolved IdentityAgent (e.g. 1Password) lacks the key.
+ */
+async function readFirstIdentityPrivateKey(
+  paths: string[],
+  deps: SshConnectDeps
+): Promise<string | undefined> {
+  for (const path of paths) {
+    const data = await deps.readFile(expandTilde(path), 'utf-8').catch(() => undefined);
+    if (!data) continue;
+    const parsed = utils.parseKey(data);
+    if (!(parsed instanceof Error) && parsed.isPrivateKey()) return data;
+  }
+  return undefined;
 }
 
 export async function resolveManualAgentSshConfig(
@@ -156,14 +179,27 @@ export async function buildAuthConfig(
       if (!agent) throw new Error(`SSH agent socket not found for connection '${base.name}'`);
       if (resolved?.identitiesOnly && resolved.identityFile.length > 0) {
         const identityKeys = await readIdentityKeys(resolved.identityFile, deps);
-        if (identityKeys.length === 0) {
+        const onDiskPrivateKey = await readFirstIdentityPrivateKey(resolved.identityFile, deps);
+        if (identityKeys.length === 0 && !onDiskPrivateKey) {
           throw new Error(
-            `IdentitiesOnly is enabled, but no IdentityFile public keys could be loaded for SSH connection '${base.name}'`
+            `IdentitiesOnly is enabled, but no IdentityFile keys could be loaded for SSH connection '${base.name}'`
           );
         }
+        const passphrase = onDiskPrivateKey
+          ? input.kind === 'transient'
+            ? input.config.passphrase
+            : await deps.getPassphrase(input.row.id)
+          : undefined;
         return {
           config: {
-            agent: new IdentityFilteredAgent(agent, deps.createAgent(agent), identityKeys),
+            // Filtered agent for IdentityFile keys the agent actually holds, plus the on-disk
+            // private key so keys absent from the agent still authenticate (OpenSSH parity).
+            ...(identityKeys.length > 0
+              ? { agent: new IdentityFilteredAgent(agent, deps.createAgent(agent), identityKeys) }
+              : {}),
+            ...(onDiskPrivateKey
+              ? { privateKey: onDiskPrivateKey, ...(passphrase ? { passphrase } : {}) }
+              : {}),
           },
           agentSocketPath: agent,
         };
