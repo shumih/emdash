@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { BrowserWindow } from 'electron';
 import appIcon from '@/assets/images/emdash/emdash_logo.png?asset';
+import { attachRendererHealthHandlers } from '@main/core/process-health/process-health-monitor';
 import { telemetryService } from '@main/lib/telemetry';
 import { registerExternalLinkHandlers } from '@main/utils/externalLinks';
 import { PRODUCT_NAME } from '@shared/app-identity';
@@ -43,6 +44,10 @@ export function createMainWindow(): BrowserWindow {
   } else {
     void mainWindow.loadURL(`${APP_ORIGIN}/index.html`);
   }
+
+  // Observe renderer crashes / hangs (the window can be recreated on macOS,
+  // so this is wired per-window).
+  attachRendererHealthHandlers(mainWindow);
 
   // Route external links to the user’s default browser
   registerExternalLinkHandlers(mainWindow, import.meta.env.DEV);

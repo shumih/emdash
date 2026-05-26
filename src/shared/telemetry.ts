@@ -31,6 +31,23 @@ export type TelemetryEventProperties = {
   app_closed: { was_crash?: boolean };
   app_window_focused: EmptyProps;
   app_window_unfocused: EmptyProps;
+
+  /** A renderer process died (crash, OOM, killed, …). reason is Electron's render-process-gone reason. */
+  renderer_process_gone: {
+    reason: string;
+    exit_code: number;
+    renderer_memory_mb: number | null;
+  };
+  /** A non-renderer child process (GPU, utility, …) died abnormally. */
+  child_process_gone: {
+    process_type: string;
+    reason: string;
+    exit_code: number | null;
+  };
+  /** The window stopped responding to input (hang). Paired with a later resume in the health log. */
+  window_unresponsive: { renderer_memory_mb: number | null };
+  /** Renderer memory crossed a high-water threshold — early-warning for the OOM crashes. */
+  renderer_memory_high: { renderer_memory_mb: number; level: 'warn' | 'critical' };
   daily_active_user: { date: string; timezone: string };
 
   focus_changed: {
