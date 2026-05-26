@@ -82,6 +82,17 @@ export class FrontendPty {
   private burstReported = false;
   private static readonly BURST_WINDOW_MS = 2000;
   private static readonly BURST_THRESHOLD_BYTES = 2 * 1024 * 1024;
+  // ── Write coalescing (active terminal) ────────────────────────────────────
+  // A fast PTY stream (agent redraws, big outputs) arrives as many tiny chunks.
+  // Calling terminal.write() per chunk means a parse + render + GC churn per
+  // chunk — under load that pins multiple cores in V8's GC and hangs the UI.
+  // Instead we accumulate chunks and flush once per animation frame: one parse,
+  // one render per ~16ms regardless of chunk count. Scrollback is unchanged.
+  private pendingWrite: string[] = [];
+  private pendingWriteBytes = 0;
+  private writeRafId: number | null = null;
+  /** Force a synchronous flush if a single frame's backlog gets large. */
+  private static readonly MAX_PENDING_WRITE_BYTES = 512 * 1024;
   /** Last { cols, rows } sent to rpc.pty.resize(). Used by PaneSizingContext to skip redundant IPC calls. */
   lastSentDims: { cols: number; rows: number } | null = null;
 
@@ -166,7 +177,7 @@ export class FrontendPty {
       (data: string) => {
         this.trackOutputBurst(data.length);
         if (this.active) {
-          this.terminal.write(data);
+          this.queueCoalescedWrite(data);
         } else {
           this.bufferWhileInactive(data);
         }
@@ -193,6 +204,39 @@ export class FrontendPty {
       if (dropped) this.backlogBytes -= dropped.length;
       this.backlogTruncated = true;
     }
+  }
+
+  /**
+   * Accumulate live output and flush to xterm once per animation frame, so a
+   * burst of N small chunks costs one parse+render instead of N. A single
+   * oversized frame is flushed immediately to bound latency/peak.
+   */
+  private queueCoalescedWrite(data: string): void {
+    this.pendingWrite.push(data);
+    this.pendingWriteBytes += data.length;
+    if (this.pendingWriteBytes >= FrontendPty.MAX_PENDING_WRITE_BYTES) {
+      this.flushPendingWrite();
+      return;
+    }
+    if (this.writeRafId !== null) return;
+    this.writeRafId = requestAnimationFrame(() => {
+      this.writeRafId = null;
+      this.flushPendingWrite();
+    });
+  }
+
+  private flushPendingWrite(): void {
+    if (this.writeRafId !== null) {
+      cancelAnimationFrame(this.writeRafId);
+      this.writeRafId = null;
+    }
+    if (this.pendingWrite.length === 0) return;
+    const batch = this.pendingWrite.join('');
+    this.pendingWrite = [];
+    this.pendingWriteBytes = 0;
+    try {
+      this.terminal.write(batch);
+    } catch {}
   }
 
   /**
@@ -268,6 +312,8 @@ export class FrontendPty {
    * the visible mount target have been disconnected.
    */
   unmount(): void {
+    // Flush any frame-batched writes before parking so nothing is left pending.
+    this.flushPendingWrite();
     // Going off-screen: stop parsing live output into xterm; buffer it instead.
     this.active = false;
     ensureXtermHost().appendChild(this.ownedContainer);
@@ -282,6 +328,12 @@ export class FrontendPty {
     FrontendPty.all.delete(this);
     this.offData?.();
     this.offData = null;
+    if (this.writeRafId !== null) {
+      cancelAnimationFrame(this.writeRafId);
+      this.writeRafId = null;
+    }
+    this.pendingWrite = [];
+    this.pendingWriteBytes = 0;
     this.backlog = [];
     this.backlogBytes = 0;
     rpc.pty.unsubscribe(this.sessionId).catch(() => {});
