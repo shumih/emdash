@@ -47,12 +47,23 @@ export function startStallDetector(): void {
   setupLongTaskObserver();
 
   let expected = Date.now() + HEARTBEAT_MS;
+
+  // When the window returns to the foreground, the previous (throttled) tick may
+  // be up to ~60s old; reset the baseline so that wake-up isn't counted as a stall.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') expected = Date.now() + HEARTBEAT_MS;
+  });
+
   setInterval(() => {
     const now = Date.now();
     const lag = now - expected;
     expected = now + HEARTBEAT_MS;
 
-    if (lag >= STALL_THRESHOLD_MS) {
+    // Only a stall while the window is visible is a real UI freeze. When the
+    // window is hidden/backgrounded, Chromium throttles this timer to ~1/min,
+    // which otherwise shows up as bogus ~59s "stalls". System sleep is the same
+    // story. Gate on visibility so the log only contains genuine foreground hangs.
+    if (lag >= STALL_THRESHOLD_MS && document.visibilityState === 'visible') {
       const { last, counts } = getRecentRpc(lag + 2000);
       void rpc.processHealth
         .record({
