@@ -11,7 +11,13 @@ export interface PtySessionMetadata {
 }
 
 const FLUSH_INTERVAL_MS = 16; // ~60 fps
-const RING_BUFFER_CAP = 64 * 1024; // 64 KB per session
+// Per-session replay buffer. This is what a renderer gets when it (re)subscribes
+// — e.g. navigating back to a task or after an app restart — so it bounds how
+// much scrollback history is actually available, independent of xterm's own
+// (much larger) SCROLLBACK_LINES ceiling. Kept as a single string sliced from
+// the tail on overflow, so very large caps get costly under output floods; 1 MB
+// (~10k typical lines) mirrors the frontend MAX_BACKLOG_BYTES.
+const RING_BUFFER_CAP = 1024 * 1024; // 1 MB per session
 
 // PTY output-throughput diagnostics. A sustained high-rate stream (a runaway
 // remote process spewing stdout) floods the renderer's xterm and hangs the UI.
