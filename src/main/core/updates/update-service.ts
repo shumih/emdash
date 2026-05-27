@@ -22,6 +22,12 @@ import { formatUpdaterError, sanitizeUpdaterLogArgs } from './utils';
 
 const { autoUpdater } = _electronUpdater;
 
+// Auto-update is disabled for this fork: the release feed points at upstream
+// Emdash (releases.emdash.sh), so checking/downloading from it is wrong for Tondash.
+// Keeping the service inert (active=false) makes checks, downloads, and
+// install-on-quit all no-op. Flip to false to re-enable once a Tondash feed exists.
+const AUTO_UPDATE_DISABLED: boolean = true;
+
 const ALLOW_PRERELEASE = false;
 const ALLOW_DOWNGRADE = false;
 const CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
@@ -69,6 +75,13 @@ class UpdateService implements IInitializable, IDisposable {
     this.updateState.currentVersion = await resolveAppVersion();
 
     if (import.meta.env.DEV) return;
+
+    if (AUTO_UPDATE_DISABLED) {
+      log.info('AutoUpdateService disabled (no Tondash release feed)', {
+        version: this.updateState.currentVersion,
+      });
+      return;
+    }
 
     this.setupAutoUpdater();
     this.setupEventListeners();

@@ -68,7 +68,7 @@ describe('FilesStore', () => {
     vi.useRealTimers();
   });
 
-  it('loads the root directory and warms discovered child directories in the background', async () => {
+  it('loads only the root directory without recursing into child directories', async () => {
     setupListFiles({
       '': [
         { path: 'src', type: 'dir' },
@@ -82,16 +82,13 @@ describe('FilesStore', () => {
     await flushAsyncWork();
     store.dispose();
 
+    expect(mocks.listFiles).toHaveBeenCalledTimes(1);
     expect(mocks.listFiles).toHaveBeenCalledWith('project-1', 'workspace-1', '.', {
       recursive: false,
       includeHidden: true,
     });
-    expect(mocks.listFiles).toHaveBeenCalledWith('project-1', 'workspace-1', 'src', {
-      recursive: false,
-      includeHidden: true,
-    });
     expect(store.loadedPaths.has('')).toBe(true);
-    expect(store.loadedPaths.has('src')).toBe(true);
+    expect(store.loadedPaths.has('src')).toBe(false);
     expect(store.rootNodes.map((node) => node.path)).toEqual(['src', 'README.md']);
   });
 
@@ -171,6 +168,9 @@ describe('FilesStore', () => {
 
     const store = new FilesStore('project-1', 'workspace-1');
     await store.tree.load();
+    // Manually load child directories (no longer auto-recursive)
+    await store.loadDir('src');
+    await store.loadDir('src/components');
     await flushAsyncWork();
 
     expect(store.nodes.has('src/components/Button.tsx')).toBe(true);

@@ -7,6 +7,15 @@ import {
   UPDATE_CHANNEL,
 } from './src/shared/app-identity.canary';
 
+// Notarize only when notary credentials are present in the environment.
+// Preferred: APPLE_KEYCHAIN_PROFILE (stored via `xcrun notarytool store-credentials`) —
+// needs no password or team id in env. Falls back to APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD
+// + APPLE_TEAM_ID, or an App Store Connect API key. electron-builder reads them from env;
+// a plain build without creds skips notarization (still produces an unsigned/ad-hoc dmg).
+const notarize = Boolean(
+  process.env.APPLE_KEYCHAIN_PROFILE || process.env.APPLE_TEAM_ID || process.env.APPLE_API_KEY
+);
+
 const config: Configuration = {
   appId: APP_ID,
   productName: PRODUCT_NAME,
@@ -37,7 +46,7 @@ const config: Configuration = {
       { target: 'zip', arch: ['arm64'] },
     ],
     icon: 'src/assets/images/emdash/emdash-canary.icns',
-    notarize: false,
+    notarize,
   },
   dmg: {
     icon: 'src/assets/images/emdash/emdash-canary.icns',
