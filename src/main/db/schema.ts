@@ -286,6 +286,14 @@ export const conversations = sqliteTable(
     provider: text('provider'),
     config: text('config'),
     providerSessionId: text('provider_session_id'),
+    /**
+     * When this conversation was created by applying a shared session, the
+     * opaque store ref it was imported from. Together with
+     * sourceTargetProvider this makes re-applying the same share idempotent.
+     */
+    sourceShareId: text('source_share_id'),
+    /** Target provider chosen when applying the shared session. */
+    sourceTargetProvider: text('source_target_provider'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -297,6 +305,11 @@ export const conversations = sqliteTable(
   },
   (table) => ({
     taskIdIdx: index('idx_conversations_task_id').on(table.taskId),
+    sourceShareIdx: uniqueIndex('idx_conversations_source_share').on(
+      table.taskId,
+      table.sourceShareId,
+      table.sourceTargetProvider
+    ),
   })
 );
 

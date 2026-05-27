@@ -7,7 +7,7 @@ import { ptyDataChannel } from '@shared/events/ptyEvents';
 import { buildTerminalFontFamily } from './terminal-font';
 import { ensureXtermHost } from './xterm-host';
 
-const SCROLLBACK_LINES = 100_000;
+const SCROLLBACK_LINES = 250_000;
 
 // ── Theme helpers ─────────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ export class FrontendPty {
   private backlog: string[] = [];
   private backlogBytes = 0;
   /** Drop the oldest buffered output past this; the user has RAM, but not infinite. */
-  private static readonly MAX_BACKLOG_BYTES = 8 * 1024 * 1024;
+  private static readonly MAX_BACKLOG_BYTES = 1 * 1024 * 1024;
   /** True once backlog overflow forced us to drop output → reset xterm before flush. */
   private backlogTruncated = false;
   // ── PTY output-burst diagnostics ──────────────────────────────────────────

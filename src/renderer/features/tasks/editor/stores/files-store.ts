@@ -210,14 +210,6 @@ export class FilesStore {
       if (!result.success) return;
 
       this._applyEntries(dirPath, result.data.entries);
-
-      for (const entry of result.data.entries) {
-        const path = normalizeFileTreePath(entry.path);
-        if (entry.type === 'dir' && path && !isExcluded(path)) {
-          void this._loadDirInternal(path);
-        }
-      }
-
       this._bumpTreeDebounced();
     } catch {
       // Silently ignore errors for individual directories

@@ -18,6 +18,7 @@ import {
   type FileSystemProvider,
   type FileWatcher,
   type ListOptions,
+  type ReadBytesResult,
   type ReadResult,
   type SearchMatch,
   type SearchOptions,
@@ -359,6 +360,135 @@ export class SshFileSystem implements FileSystemProvider {
               success: true,
               bytesWritten: buffer.length,
             });
+          });
+        });
+      });
+    });
+  }
+
+  /**
+   * Read an entire file as base64 (binary-safe) via SFTP, reading in chunks so
+   * a single sftp.read short-read can't truncate the payload. Used for binary
+   * transcripts such as Cursor's `store.db`.
+   */
+  async readBytes(path: string, maxBytes: number = 64 * 1024 * 1024): Promise<ReadBytesResult> {
+    const fullPath = this.resolveRemotePath(path);
+    const sftp = await this.getSftp();
+
+    return new Promise<ReadBytesResult>((resolve, reject) => {
+      sftp.open(fullPath, 'r', (err, handle) => {
+        if (err) {
+          reject(this.mapSftpError(err, fullPath));
+          return;
+        }
+
+        sftp.fstat(handle, (statErr, stats) => {
+          if (statErr) {
+            sftp.close(handle, () => {});
+            reject(this.mapSftpError(statErr, fullPath));
+            return;
+          }
+
+          if (stats.isDirectory()) {
+            sftp.close(handle, () => {});
+            reject(
+              new FileSystemError(
+                `Path is a directory: ${path}`,
+                FileSystemErrorCodes.IS_DIRECTORY,
+                path
+              )
+            );
+            return;
+          }
+
+          const fileSize = stats.size;
+          const readSize = Math.min(fileSize, maxBytes, MAX_READ_SIZE);
+          const truncated = fileSize > readSize;
+
+          if (readSize === 0) {
+            sftp.close(handle, () => {});
+            resolve({ base64: '', truncated, totalSize: fileSize });
+            return;
+          }
+
+          const buffer = Buffer.alloc(readSize);
+          let offset = 0;
+
+          const readNext = () => {
+            const remaining = readSize - offset;
+            if (remaining <= 0) {
+              sftp.close(handle, () => {});
+              resolve({
+                base64: buffer.subarray(0, offset).toString('base64'),
+                truncated,
+                totalSize: fileSize,
+              });
+              return;
+            }
+            sftp.read(handle, buffer, offset, remaining, offset, (readErr, bytesRead) => {
+              if (readErr) {
+                sftp.close(handle, () => {});
+                reject(this.mapSftpError(readErr, fullPath));
+                return;
+              }
+              if (!bytesRead) {
+                // EOF before expected size — return what we have.
+                sftp.close(handle, () => {});
+                resolve({
+                  base64: buffer.subarray(0, offset).toString('base64'),
+                  truncated,
+                  totalSize: fileSize,
+                });
+                return;
+              }
+              offset += bytesRead;
+              readNext();
+            });
+          };
+
+          readNext();
+        });
+      });
+    });
+  }
+
+  /**
+   * Write base64-decoded bytes to a remote file via SFTP (binary-safe),
+   * creating parent directories. Writes in chunks to avoid short-writes.
+   */
+  async writeBytes(path: string, base64: string): Promise<WriteResult> {
+    const fullPath = this.resolveRemotePath(path);
+    const sftp = await this.getSftp();
+
+    const lastSlash = fullPath.lastIndexOf('/');
+    if (lastSlash > 0) {
+      await this.ensureRemoteDir(sftp, fullPath.substring(0, lastSlash));
+    }
+
+    const buffer = Buffer.from(base64, 'base64');
+
+    return new Promise<WriteResult>((resolve, reject) => {
+      sftp.open(fullPath, 'w', (err, handle) => {
+        if (err) {
+          reject(this.mapSftpError(err, fullPath));
+          return;
+        }
+
+        if (buffer.length === 0) {
+          sftp.close(handle, (closeErr) => {
+            if (closeErr) reject(this.mapSftpError(closeErr, fullPath));
+            else resolve({ success: true, bytesWritten: 0 });
+          });
+          return;
+        }
+
+        // ssh2's sftp.write splits the buffer into SFTP packets internally, so a
+        // single call writes the whole buffer.
+        sftp.write(handle, buffer, 0, buffer.length, 0, (writeErr) => {
+          sftp.close(handle, (closeErr) => {
+            if (writeErr) reject(this.mapSftpError(writeErr, fullPath));
+            else if (closeErr) reject(this.mapSftpError(closeErr, fullPath));
+            else resolve({ success: true, bytesWritten: buffer.length });
           });
         });
       });

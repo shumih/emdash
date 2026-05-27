@@ -16,6 +16,10 @@ export type Conversation = {
    * which the CLI does not reliably persist under. Null until first captured.
    */
   providerSessionId?: string | null;
+  /** When imported from a shared session, the opaque store ref it came from. */
+  sourceShareId?: string | null;
+  /** Target provider chosen when the shared session was applied. */
+  sourceTargetProvider?: string | null;
 };
 
 export type RenameConversationParams = {
@@ -33,4 +37,15 @@ export type CreateConversationParams = {
   isInitialConversation?: boolean;
   initialSize?: { cols: number; rows: number };
   initialPrompt?: string;
+  /**
+   * Pre-seed the real CLI session id (e.g. when applying a shared session whose
+   * transcript was written to disk under a deterministic id). When set together
+   * with `resume: true`, the spawned CLI resumes that transcript.
+   */
+  providerSessionId?: string;
+  /** Spawn the agent in resume mode rather than starting a fresh session. */
+  resume?: boolean;
+  /** Provenance for an applied shared session (idempotency key components). */
+  sourceShareId?: string;
+  sourceTargetProvider?: string;
 };

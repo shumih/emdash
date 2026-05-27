@@ -245,14 +245,16 @@ export const ImageDiffView = observer(function ImageDiffView({
     queryKey: ['image-diff', 'original', projectId, workspaceId, fileKey, reactiveRevision],
     queryFn: () => loadOriginal(projectId, workspaceId, activeFile),
     placeholderData: placeholder,
-    staleTime: Infinity,
+    staleTime: 30_000,
+    gcTime: 60_000,
   });
 
   const modifiedQuery = useQuery({
     queryKey: ['image-diff', 'modified', projectId, workspaceId, fileKey, reactiveRevision],
     queryFn: () => loadModifiedWithTransientRetry(projectId, workspaceId, activeFile),
     placeholderData: placeholder,
-    staleTime: Infinity,
+    staleTime: 30_000,
+    gcTime: 60_000,
   });
 
   const original = originalQuery.data ?? placeholder;

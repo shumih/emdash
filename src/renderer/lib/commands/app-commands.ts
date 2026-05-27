@@ -28,6 +28,7 @@ function createAppCommandProvider(): CommandProvider {
       const settingsDef = appDef('app.settings');
       const newProjectDef = appDef('app.newProject');
       const giveFeedbackDef = appDef('app.giveFeedback');
+      const shareSessionDef = appDef('app.shareSession');
       const toggleThemeDef = appDef('app.toggleTheme');
       const navigateBackDef = appDef('app.navigateBack');
       const navigateForwardDef = appDef('app.navigateForward');
@@ -67,6 +68,17 @@ function createAppCommandProvider(): CommandProvider {
         group: giveFeedbackDef.group,
         execute() {
           showModal('feedbackModal', {});
+        },
+      });
+
+      commands.push({
+        id: shareSessionDef.id,
+        label: shareSessionDef.label,
+        description: shareSessionDef.description,
+        shortcutKey: shareSessionDef.shortcutKey,
+        group: shareSessionDef.group,
+        execute() {
+          showModal('searchSessionsModal', {});
         },
       });
 

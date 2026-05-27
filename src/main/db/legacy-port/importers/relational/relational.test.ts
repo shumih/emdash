@@ -71,6 +71,8 @@ function createAppDb(): {
       provider TEXT,
       config TEXT,
       provider_session_id TEXT,
+      source_share_id TEXT,
+      source_target_provider TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_interacted_at TEXT,

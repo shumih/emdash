@@ -5,6 +5,7 @@ import {
   ArrowUpToLine,
   ChevronDown,
   ChevronUp,
+  Download,
   FileDiff,
   Files,
   FolderOpen,
@@ -18,6 +19,7 @@ import {
   PanelRight,
   Pin,
   Settings,
+  Share,
   SquarePlus,
   SquareTerminal,
   Terminal,
@@ -52,6 +54,8 @@ export const COMMAND_ICONS = {
   pin: Pin,
   'chevron-down': ChevronDown,
   'chevron-up': ChevronUp,
+  share: Share,
+  download: Download,
 } satisfies Record<string, LucideIcon>;
 
 export type CommandIconKey = keyof typeof COMMAND_ICONS;

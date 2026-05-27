@@ -177,6 +177,16 @@ export class PrStore {
     void rpc.pullRequests.syncChecks(pr.url, pr.headRefOid);
   }
 
+  pruneStaleFiles(): void {
+    const activePrUrls = new Set(this.pullRequests.map((pr) => pr.url));
+    for (const [key, entry] of this._prFiles) {
+      if (!activePrUrls.has(key)) {
+        entry.resource.dispose();
+        this._prFiles.delete(key);
+      }
+    }
+  }
+
   dispose(): void {
     for (const entry of this._prFiles.values()) entry.resource.dispose();
   }

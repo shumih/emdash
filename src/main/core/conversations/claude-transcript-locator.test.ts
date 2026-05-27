@@ -34,8 +34,11 @@ describe('pickNewSessionId', () => {
 });
 
 describe('listClaudeSessionIds', () => {
-  const fakeFs = (entries: { path: string }[]) => ({
-    list: async () => ({ entries, total: entries.length }),
+  const fakeFs = (entries: { path: string; type?: 'file' | 'dir' }[]) => ({
+    list: async () => ({
+      entries: entries.map((e) => ({ type: 'file' as const, ...e })),
+      total: entries.length,
+    }),
   });
 
   it('extracts session ids from .jsonl basenames and ignores other entries', async () => {

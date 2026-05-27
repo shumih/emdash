@@ -12,6 +12,7 @@ import KeyboardSettingsCard from './KeyboardSettingsCard';
 import NotificationSettingsCard from './NotificationSettingsCard';
 import RepositorySettingsCard from './RepositorySettingsCard';
 import ResourceMonitorSettingsCard from './ResourceMonitorSettingsCard';
+import SessionSharingSettingsCard from './SessionSharingSettingsCard';
 import { SshConnectionsSettingsCard } from './SshConnectionsSettingsCard';
 import {
   AutoGenerateTaskNamesRow,
@@ -128,7 +129,10 @@ export function SettingsPage({
     integrations: {
       title: 'Integrations',
       description: 'Connect external services and tools.',
-      sections: [{ title: 'Integrations', component: <IntegrationsCard /> }],
+      sections: [
+        { title: 'Integrations', component: <IntegrationsCard /> },
+        { title: 'Session sharing', component: <SessionSharingSettingsCard /> },
+      ],
     },
     connections: {
       title: 'Connections',

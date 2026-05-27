@@ -56,6 +56,14 @@ export const APP_COMMAND_DEFS = defineCommandDefs([
     iconKey: 'message-square-share',
   },
   {
+    id: 'app.shareSession',
+    label: 'Share a Session',
+    description: 'Find a session across your projects and share it',
+    scope: 'app',
+    group: 'App',
+    iconKey: 'share',
+  },
+  {
     id: 'app.toggleTheme',
     label: 'Toggle Theme',
     description: 'Switch between light and dark themes',
@@ -92,6 +100,14 @@ export const TASK_COMMAND_DEFS = defineCommandDefs([
     shortcutKey: 'newConversation',
     group: 'Conversations',
     iconKey: 'message-square-plus',
+  },
+  {
+    id: 'task.addSharedSession',
+    label: 'Add Shared Session',
+    description: 'Import a shared session into this task',
+    scope: 'task',
+    group: 'Conversations',
+    iconKey: 'download',
   },
   {
     id: 'task.sidebarChanges',

@@ -15,6 +15,7 @@ import { wirePrCacheInvalidation } from '@renderer/lib/pr-cache-invalidation';
 import { viewStateCache } from '@renderer/lib/stores/view-state-cache';
 import { log } from '@renderer/utils/logger';
 import { initSoundPlayer } from '@renderer/utils/soundPlayer';
+import { startStallDetector } from '@renderer/utils/stall-detector';
 import type { NavigationSnapshot, SidebarSnapshot } from '@shared/view-state';
 import { App } from './App';
 import { ErrorBoundary } from './lib/components/error-boundary';
@@ -28,6 +29,7 @@ async function bootstrap() {
 
   appState.update.start();
   initSoundPlayer();
+  startStallDetector();
 
   // Initialize Monaco and load app data in parallel. Awaiting Monaco here
   // guarantees __monaco is set before React renders, so StickyDiffEditor can

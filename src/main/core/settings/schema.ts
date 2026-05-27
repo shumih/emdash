@@ -108,6 +108,12 @@ export const browserPreviewSettingsSchema = z.object({ enabled: z.boolean() });
 
 export const resourceMonitorSettingsSchema = z.object({ enabled: z.boolean() });
 
+export const sessionSharingSettingsSchema = z.object({
+  enabled: z.boolean(),
+  /** Base URL of the external session-share storage service. */
+  endpointUrl: z.string(),
+});
+
 export const openInSettingsSchema = z.object({
   default: openInAppIdSchema,
   hidden: z.array(openInAppIdSchema),
@@ -128,6 +134,7 @@ export const APP_SETTINGS_SCHEMA_MAP = {
   browserPreview: browserPreviewSettingsSchema,
   resourceMonitor: resourceMonitorSettingsSchema,
   changesViewMode: changesViewModeSchema,
+  sessionSharing: sessionSharingSettingsSchema,
 } as const;
 
 export const appSettingsSchema = z.object({
@@ -145,4 +152,5 @@ export const appSettingsSchema = z.object({
   browserPreview: browserPreviewSettingsSchema,
   resourceMonitor: resourceMonitorSettingsSchema,
   changesViewMode: changesViewModeSchema,
+  sessionSharing: sessionSharingSettingsSchema,
 });
