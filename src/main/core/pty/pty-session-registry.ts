@@ -1,3 +1,4 @@
+import { recordHealthEvent } from '@main/core/process-health/process-health-monitor';
 import { events } from '@main/lib/events';
 import type { AgentProviderId } from '@shared/agent-provider-registry';
 import { ptyDataChannel, ptyExitChannel, ptyInputChannel } from '@shared/events/ptyEvents';
@@ -11,6 +12,15 @@ export interface PtySessionMetadata {
 
 const FLUSH_INTERVAL_MS = 16; // ~60 fps
 const RING_BUFFER_CAP = 64 * 1024; // 64 KB per session
+
+// PTY output-throughput diagnostics. A sustained high-rate stream (a runaway
+// remote process spewing stdout) floods the renderer's xterm and hangs the UI.
+// This runs in the MAIN process — which stays responsive even while the
+// renderer is pegged — so it reliably captures the flood (rate + a sample of
+// what's streaming) to the process-health log for diagnosis.
+const THROUGHPUT_WINDOW_MS = 1000;
+const THROUGHPUT_REPORT_THRESHOLD = 1024 * 1024; // report when >1 MB/s
+const THROUGHPUT_REPORT_COOLDOWN_MS = 2000;
 
 export class PtySessionRegistry {
   private ptyMap: Map<string, Pty> = new Map();
@@ -37,6 +47,12 @@ export class PtySessionRegistry {
     let buffer = '';
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+    // Throughput tracking (diagnostics only).
+    let windowStart = Date.now();
+    let windowBytes = 0;
+    let lastReportAt = 0;
+    let lastSample = '';
+
     const flush = () => {
       if (buffer) {
         events.emit(ptyDataChannel, buffer, sessionId);
@@ -54,6 +70,39 @@ export class PtySessionRegistry {
       let rb = (this.ringBuffers.get(sessionId) ?? '') + data;
       if (rb.length > RING_BUFFER_CAP) rb = rb.slice(-RING_BUFFER_CAP);
       this.ringBuffers.set(sessionId, rb);
+
+      // Throughput meter: detect a flood and log rate + a short content sample.
+      windowBytes += data.length;
+      lastSample = data;
+      const now = Date.now();
+      const elapsed = now - windowStart;
+      if (elapsed >= THROUGHPUT_WINDOW_MS) {
+        const bytesPerSec = Math.round((windowBytes / elapsed) * 1000);
+        if (
+          windowBytes >= THROUGHPUT_REPORT_THRESHOLD &&
+          now - lastReportAt >= THROUGHPUT_REPORT_COOLDOWN_MS
+        ) {
+          lastReportAt = now;
+          const meta = this.metadata.get(sessionId);
+          recordHealthEvent({
+            kind: 'pty_throughput',
+            sessionId,
+            bytes_per_sec: bytesPerSec,
+            provider: meta?.providerId ?? null,
+            is_remote: meta?.isRemote ?? null,
+            // First ~160 chars of the latest chunk, control chars escaped, so we
+            // can tell apart build output / escape storms / binary garbage.
+            sample: lastSample
+              .slice(0, 160)
+              .replace(
+                /[\x00-\x1f\x7f]/g,
+                (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`
+              ),
+          });
+        }
+        windowStart = now;
+        windowBytes = 0;
+      }
     });
 
     pty.onExit((info) => {
