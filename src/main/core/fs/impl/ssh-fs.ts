@@ -3,7 +3,8 @@
  * Uses SFTP over SSH for remote filesystem operations
  */
 
-import type { SFTPWrapper } from 'ssh2';
+import { createReadStream, statSync } from 'node:fs';
+import type { ClientChannel, SFTPWrapper } from 'ssh2';
 import { buildRemoteShellCommand } from '@main/core/ssh/lifecycle/remote-shell-profile';
 import type { SshClientProxy } from '@main/core/ssh/lifecycle/ssh-client-proxy';
 import { log } from '@main/lib/logger';
@@ -23,12 +24,40 @@ import {
   type SearchResult,
   type WriteResult,
 } from '../types';
+import { uploadFileViaNativeSsh } from './native-ssh-upload';
 
 const SFTP_STATUS = {
   NO_SUCH_FILE: 2,
   PERMISSION_DENIED: 3,
   FAILURE: 4,
 } as const;
+
+/** Shared remote dir for pasted/dropped artifacts (kept out of the worktree). */
+const REMOTE_UPLOAD_DIR = '/tmp/tondash/artifacts';
+
+/** Delete uploaded artifacts older than this many minutes (24h). */
+const REMOTE_UPLOAD_MAX_AGE_MINUTES = 24 * 60;
+
+/**
+ * Upload timeout so a stalled transfer can never leave the UI spinner hanging
+ * forever. Floor of 10s (matches the user-requested minimum) plus 1s per MB so
+ * legitimately large files on a slow link aren't cut off prematurely.
+ */
+export function uploadTimeoutMs(totalBytes: number): number {
+  const perMb = Math.ceil(Math.max(0, totalBytes) / (1024 * 1024)) * 1000;
+  return 10_000 + perMb;
+}
+
+/**
+ * Reduce an arbitrary filename to a single safe POSIX path segment: strips any
+ * directory components and replaces anything outside [A-Za-z0-9._-] with '_'.
+ * This neutralizes path traversal ('..', '/') and shell metacharacters.
+ */
+export function sanitizeRemoteUploadName(name: string): string {
+  const base = (name.split(/[\\/]/).pop() ?? '').replace(/[^A-Za-z0-9._-]/g, '_');
+  const trimmed = base.replace(/^\.+/, '');
+  return trimmed.length > 0 ? trimmed : 'upload';
+}
 
 interface SftpError extends Error {
   code?: number;
@@ -502,6 +531,152 @@ export class SshFileSystem implements FileSystemProvider {
     await new Promise<void>((resolve, reject) => {
       sftp.fastPut(localAbsPath, remoteFull, (e) => (e ? reject(e) : resolve()));
     });
+  }
+
+  /**
+   * Upload a local file into the shared remote temp dir and return its absolute
+   * remote path. Intentionally bypasses resolveRemotePath's within-base guard:
+   * the destination is a fixed, controlled dir outside the worktree, and the
+   * filename is sanitized to a single safe segment.
+   *
+   * Streams the bytes through a single `cat > file` channel on the already
+   * authenticated connection (mirroring the user's fast `ssh '… cat >'`
+   * approach) rather than SFTP `fastPut`. fastPut's many concurrent windowed
+   * requests get starved when the same connection is busy carrying PTY output,
+   * which made transfers crawl; a single sequential stream stays responsive.
+   * A size-scaled timeout guarantees a stalled transfer can't hang the UI.
+   */
+  async uploadToTemp(
+    localAbsPath: string,
+    filename: string,
+    onProgress?: (transferred: number, total: number) => void
+  ): Promise<string> {
+    const safe = sanitizeRemoteUploadName(filename);
+    const remoteFull = `${REMOTE_UPLOAD_DIR}/${safe}`;
+    let total = 0;
+    try {
+      total = statSync(localAbsPath).size;
+    } catch {
+      total = 0;
+    }
+    onProgress?.(0, total);
+
+    // Fast path: stream via the system ssh client, which reuses the user's ssh
+    // config/agent and doesn't compete with the live session for bandwidth. Falls
+    // back to the ssh2 stream if no target is known or native ssh fails (e.g. a
+    // password-only host where BatchMode can't authenticate).
+    const target = this.proxy.nativeUploadTarget;
+    if (target) {
+      try {
+        await uploadFileViaNativeSsh({
+          target,
+          localAbsPath,
+          remoteDir: REMOTE_UPLOAD_DIR,
+          remoteName: safe,
+          total,
+          timeoutMs: uploadTimeoutMs(total),
+          onProgress,
+        });
+        void this.pruneOldUploads();
+        return remoteFull;
+      } catch (e) {
+        log.warn('native ssh upload failed; falling back to ssh2 stream', {
+          error: e instanceof Error ? e.message : String(e),
+        });
+        onProgress?.(0, total);
+      }
+    }
+
+    await this.streamUploadViaCat(localAbsPath, remoteFull, total, onProgress);
+    void this.pruneOldUploads();
+    return remoteFull;
+  }
+
+  /**
+   * Pipe a local file into `mkdir -p … && cat > <remote>` over a single exec
+   * channel. Progress is reported from bytes read off disk (a close proxy for
+   * bytes sent). Rejects on a non-zero remote exit, a stream error, or the
+   * size-scaled timeout — never resolves silently on a stall.
+   *
+   * -m 700: keep pasted artifacts (potentially sensitive screenshots) private
+   * and ensure only the owning user can write here, so the prune never touches
+   * another user's files on a shared host.
+   */
+  private async streamUploadViaCat(
+    localAbsPath: string,
+    remoteFull: string,
+    total: number,
+    onProgress?: (transferred: number, total: number) => void
+  ): Promise<void> {
+    const profile = await this.proxy.getRemoteShellProfile();
+    const command = `mkdir -p -m 700 ${quoteShellArg(REMOTE_UPLOAD_DIR)} && cat > ${quoteShellArg(
+      remoteFull
+    )}`;
+    const full = buildRemoteShellCommand(profile, command);
+
+    await new Promise<void>((resolve, reject) => {
+      this.proxy.exec(full, (err, channel: ClientChannel) => {
+        if (err) return reject(err);
+
+        let settled = false;
+        let stderr = '';
+        let transferred = 0;
+        const fileStream = createReadStream(localAbsPath);
+
+        const timer = setTimeout(() => {
+          finish(
+            new Error(
+              `Upload timed out after ${Math.round(uploadTimeoutMs(total) / 1000)}s ` +
+                `(${transferred}/${total} bytes)`
+            )
+          );
+        }, uploadTimeoutMs(total));
+
+        const finish = (error?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fileStream.destroy();
+          try {
+            channel.close();
+          } catch {
+            // channel may already be torn down
+          }
+          if (error) reject(error);
+          else resolve();
+        };
+
+        channel.stderr.on('data', (d: Buffer) => {
+          stderr += d.toString('utf-8');
+        });
+        channel.on('close', (code: number | null) => {
+          if (code && code !== 0) {
+            finish(new Error(`Remote cat exited with code ${code}${stderr ? `: ${stderr}` : ''}`));
+          } else {
+            finish();
+          }
+        });
+        channel.on('error', (e: Error) => finish(e));
+
+        fileStream.on('data', (chunk: string | Buffer) => {
+          transferred += chunk.length;
+          onProgress?.(transferred, total);
+        });
+        fileStream.on('error', (e: Error) => finish(e));
+        fileStream.pipe(channel);
+      });
+    });
+  }
+
+  /** Best-effort cleanup of stale uploads; failures are non-fatal. */
+  private async pruneOldUploads(): Promise<void> {
+    try {
+      await this.exec(
+        `find ${quoteShellArg(REMOTE_UPLOAD_DIR)} -type f -mmin +${REMOTE_UPLOAD_MAX_AGE_MINUTES} -delete`
+      );
+    } catch (e) {
+      log.warn('pruneOldUploads failed', { error: e instanceof Error ? e.message : String(e) });
+    }
   }
 
   async copyFile(src: string, dest: string): Promise<void> {

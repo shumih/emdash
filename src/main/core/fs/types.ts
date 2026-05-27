@@ -264,6 +264,20 @@ export interface FileSystemProvider {
   copyLocalFile?(localAbsPath: string, destRelPath: string): Promise<void>;
 
   /**
+   * Upload an absolute local file into the host's shared temp dir (outside the
+   * worktree) and return its absolute remote path. Used for pasted/dropped
+   * images so they don't pollute the project working directory.
+   * @param localAbsPath - Absolute path of the source file on the local machine
+   * @param filename     - Desired remote filename (sanitized by the implementation)
+   * @param onProgress   - Optional transfer progress callback (bytes transferred / total)
+   */
+  uploadToTemp?(
+    localAbsPath: string,
+    filename: string,
+    onProgress?: (transferred: number, total: number) => void
+  ): Promise<string>;
+
+  /**
    * Watch the worktree for filesystem changes. Returns a FileWatcher handle;
    * call update() to hint which paths matter (SSH uses this for polling),
    * call close() to stop. Batches events and delivers them via callback.

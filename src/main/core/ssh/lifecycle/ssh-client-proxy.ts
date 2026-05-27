@@ -1,4 +1,5 @@
 import type { Client, ClientCallback, ClientSFTPCallback, ExecOptions } from 'ssh2';
+import type { NativeSshUploadTarget } from '@main/core/fs/impl/native-ssh-upload';
 import { captureRemoteShellProfile, type RemoteShellProfile } from './remote-shell-profile';
 
 type RemoteShellProfileState =
@@ -19,6 +20,14 @@ type RemoteShellProfileState =
 export class SshClientProxy {
   private _client: Client | null = null;
   private _remoteShellProfileState: RemoteShellProfileState = { kind: 'empty' };
+
+  /**
+   * Coordinates for uploading files via the system ssh client (fast path that
+   * bypasses the bulk-data-slow shared ssh2 connection). Set by
+   * SshConnectionManager from the persisted connection row; absent for
+   * connections established without a row (e.g. ad-hoc test connections).
+   */
+  nativeUploadTarget?: NativeSshUploadTarget;
 
   constructor(
     readonly connectionId: string,

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { conversationEvents } from '@main/core/conversations/conversation-events';
+import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
+import { ptyUploadProgressChannel } from '@shared/events/ptyEvents';
 import { createRPCController } from '@shared/ipc/rpc';
 import { parsePtySessionId } from '@shared/ptySessionId';
 import { err, ok } from '@shared/result';
@@ -9,6 +11,7 @@ import { taskManager } from '../tasks/task-manager';
 import { workspaceRegistry } from '../workspaces/workspace-registry';
 import {
   cleanupExpiredDroppedBlobs,
+  DROPPED_BLOB_FILENAME_PREFIX,
   persistClipboardImagePath,
   persistDroppedBlobBytes,
 } from './persist-dropped-blob';
@@ -17,6 +20,17 @@ import { ptySessionRegistry } from './pty-session-registry';
 void cleanupExpiredDroppedBlobs().catch((error) => {
   log.warn('pty:cleanupExpiredDroppedBlobs failed', { error });
 });
+
+/**
+ * Recover a human-readable name from a local upload path for progress display.
+ * Temp blobs are named `emdash-drop-<uuid>[-<name>]<ext>`; strip the prefix and
+ * uuid so the user sees e.g. `paste.png` rather than the internal temp name.
+ */
+function prettyUploadName(base: string): string {
+  if (!base.startsWith(DROPPED_BLOB_FILENAME_PREFIX)) return base;
+  const rest = base.slice(DROPPED_BLOB_FILENAME_PREFIX.length).replace(/^[0-9a-f-]{36}-?/i, '');
+  return rest && !rest.startsWith('.') ? rest : `image${rest}`;
+}
 
 export const ptyController = createRPCController({
   /** Send raw input data to a PTY session. */
@@ -82,14 +96,15 @@ export const ptyController = createRPCController({
   },
 
   /**
-   * Upload local files into the task's working directory on a remote SSH host
-   * and return their remote paths.  Uses the SFTP subsystem of the already-
-   * connected ssh2 client — no local ssh/scp binaries are involved.
+   * Upload local files into the shared remote temp dir (`/tmp/tondash/artifacts`)
+   * on a remote SSH host and return their absolute remote paths. Kept out of the
+   * worktree so pasted/dropped images don't pollute the project. Uses the SFTP
+   * subsystem of the already-connected ssh2 client — no local ssh/scp binaries.
    *
    * The session ID encodes the project and scope (`projectId:scopeId:leafId`),
    * where `scopeId` is a task ID for conversation uploads.
    */
-  uploadFiles: async (args: { sessionId: string; localPaths: string[] }) => {
+  uploadFiles: async (args: { sessionId: string; localPaths: string[]; uploadId?: string }) => {
     try {
       const parsed = parsePtySessionId(args.sessionId);
       if (!parsed) {
@@ -102,15 +117,38 @@ export const ptyController = createRPCController({
 
       const workspaceId = taskManager.getWorkspaceId(scopeId) ?? '';
       const workspace = workspaceRegistry.get(workspaceId);
-      if (!workspace?.fs.copyLocalFile) return err({ type: 'not_ssh' as const });
+      if (!workspace?.fs.uploadToTemp) return err({ type: 'not_ssh' as const });
 
-      const remotePaths = await Promise.all(
-        args.localPaths.map(async (localPath) => {
-          const remoteName = `${randomUUID()}-${basename(localPath)}`;
-          await workspace.fs.copyLocalFile!(localPath, remoteName);
-          return `${workspace.path}/${remoteName}`;
-        })
-      );
+      const { uploadId } = args;
+      const count = args.localPaths.length;
+      // Sequential so the single progress toast advances file-by-file cleanly.
+      const remotePaths: string[] = [];
+      for (let i = 0; i < args.localPaths.length; i++) {
+        const localPath = args.localPaths[i];
+        const name = prettyUploadName(basename(localPath));
+        let total = 0;
+        let lastEmit = 0;
+        const emit = (transferred: number, t: number, phase: 'progress' | 'done') => {
+          if (!uploadId) return;
+          if (t) total = t;
+          const now = Date.now();
+          // Throttle in-flight updates to ~12/s; always emit completion.
+          if (phase === 'progress' && transferred < total && now - lastEmit < 80) return;
+          lastEmit = now;
+          events.emit(
+            ptyUploadProgressChannel,
+            { uploadId, name, index: i + 1, count, transferred, total, phase },
+            uploadId
+          );
+        };
+        const remote = await workspace.fs.uploadToTemp!(
+          localPath,
+          `${randomUUID()}-${basename(localPath)}`,
+          (transferred, t) => emit(transferred, t, 'progress')
+        );
+        emit(total, total, 'done');
+        remotePaths.push(remote);
+      }
       return ok({ remotePaths });
     } catch (e: unknown) {
       log.error('pty:uploadFiles failed', {

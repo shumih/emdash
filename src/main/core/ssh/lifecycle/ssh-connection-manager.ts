@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import ssh2, { type Client, type ConnectConfig } from 'ssh2';
+import { parseSshConnectionMetadata } from '@main/core/ssh/config/connection-metadata';
 import type { SshConnectionRow } from '@main/db/schema';
 import type { SshConnectionEvent } from '@shared/events/sshEvents';
 import type { ConnectionState, SshHealthState } from '@shared/ssh';
@@ -168,6 +169,19 @@ export class SshConnectionManager extends EventEmitter {
       resolved.cleanup();
       throw new SshConnectionError(`SSH connection '${id}' was disconnected before connecting`);
     }
+    // Attach native-ssh upload coordinates so SshFileSystem can stream pasted
+    // files via the system ssh client (fast) instead of the shared ssh2 socket.
+    const metadata = parseSshConnectionMetadata(row.metadata);
+    const proxy = this.proxies.get(id) ?? new SshClientProxy(id, this);
+    this.proxies.set(id, proxy);
+    proxy.nativeUploadTarget = {
+      alias: metadata.sshConfigAlias,
+      host: row.host,
+      port: row.port,
+      username: row.username,
+      proxyJump: metadata.proxyJump,
+    };
+
     const connectionPromise = this.createConnection(id, resolved.config, resolved.cleanup, {
       emitConnecting: false,
       generation,

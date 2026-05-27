@@ -1,7 +1,9 @@
 import React, { forwardRef, useCallback, useImperativeHandle, useRef } from 'react';
-import { rpc } from '@renderer/lib/ipc';
+import { toast } from 'sonner';
+import { events, rpc } from '@renderer/lib/ipc';
 import { log } from '@renderer/utils/logger';
 import { cn } from '@renderer/utils/utils';
+import { ptyUploadProgressChannel } from '@shared/events/ptyEvents';
 import type { FrontendPty, SessionTheme } from './pty';
 import { resolveDroppedFile } from './terminal-image-injection';
 import {
@@ -33,6 +35,31 @@ type Props = {
 
 type TerminalInputHelpers = Parameters<PasteFromClipboardHandler>[0];
 
+function formatBytes(n: number): string {
+  if (!n || n < 1024) return `${Math.max(0, Math.trunc(n))} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// A single Cmd+V on macOS can deliver two `paste` events — one from the Edit
+// menu's role:'paste' accelerator and one from Chromium's native edit command —
+// which would inject the same image twice. Dedupe by clipboard signature within
+// a short window. 700ms catches the near-instant double-fire while still
+// allowing a deliberate re-paste of the same image moments later.
+const DUPLICATE_PASTE_WINDOW_MS = 700;
+
+function clipboardSignature(clipboardData: DataTransfer | null, fallbackText: string): string {
+  if (!clipboardData) return `text:${fallbackText.length}`;
+  const files = Array.from(clipboardData.items)
+    .filter((item) => item.kind === 'file')
+    .map((item) => {
+      const file = item.getAsFile();
+      return file ? `${file.name}:${file.size}:${file.lastModified}` : item.type;
+    })
+    .join('|');
+  return `${clipboardData.types?.join(',') ?? ''}#${files}#${fallbackText.length}`;
+}
+
 async function injectTerminalImagePaths(args: {
   paths: string[];
   sessionId: string;
@@ -44,12 +71,48 @@ async function injectTerminalImagePaths(args: {
 
   let paths = args.paths;
   if (args.remoteConnectionId) {
-    const result = await rpc.pty.uploadFiles({ sessionId: args.sessionId, localPaths: paths });
+    // Stream live SFTP progress (file name + bytes transferred) into one toast,
+    // scoped to this batch via uploadId, the way the Raycast uploader does.
+    const uploadId = crypto.randomUUID();
+    const toastId = `pty-upload-${uploadId}`;
+    toast.loading('Uploading to remote…', { id: toastId });
+    const unsubscribe = events.on(
+      ptyUploadProgressChannel,
+      (p) => {
+        const label = p.count > 1 ? `${p.name} (${p.index}/${p.count})` : p.name;
+        const size = p.total
+          ? `${formatBytes(p.transferred)} / ${formatBytes(p.total)}`
+          : 'sending…';
+        toast.loading(`Uploading ${label} — ${size}`, { id: toastId });
+      },
+      uploadId
+    );
+
+    let result: Awaited<ReturnType<typeof rpc.pty.uploadFiles>>;
+    try {
+      result = await rpc.pty.uploadFiles({
+        sessionId: args.sessionId,
+        localPaths: paths,
+        uploadId,
+      });
+    } finally {
+      unsubscribe();
+    }
+
     if (!result.success) {
       log.warn('SSH file transfer failed', { error: result.error });
+      const description =
+        'message' in result.error
+          ? result.error.message
+          : 'Could not upload image to the remote host.';
+      toast.error('Image upload failed', { id: toastId, description });
       return;
     }
     paths = result.data.remotePaths;
+    toast.success(
+      paths.length > 1 ? `Uploaded ${paths.length} files to remote` : 'Uploaded to remote',
+      { id: toastId }
+    );
     if (paths.length === 0) return;
   }
 
@@ -162,6 +225,7 @@ const PtyPaneComponent = forwardRef<{ focus: () => void }, Props>(
     ref
   ) => {
     const containerRef = useRef<HTMLDivElement | null>(null);
+    const lastPasteRef = useRef<{ sig: string; at: number } | null>(null);
 
     const theme: SessionTheme = { override: themeOverride };
 
@@ -228,9 +292,32 @@ const PtyPaneComponent = forwardRef<{ focus: () => void }, Props>(
       (event: React.ClipboardEvent<HTMLDivElement>) => {
         const clipboardData = event.clipboardData;
         const fallbackText = clipboardData?.getData('text/plain') ?? '';
+
+        // When we handle the paste ourselves, also stop propagation so the event
+        // never reaches xterm's own textarea paste listener — otherwise xterm
+        // pastes the clipboard's text (e.g. the source image's file path) and a
+        // second image is injected alongside ours.
+        const claimPaste = () => {
+          event.preventDefault();
+          event.stopPropagation();
+          event.nativeEvent.stopImmediatePropagation();
+        };
+
+        // Drop a duplicate paste event for the same clipboard content (macOS
+        // double-fires Cmd+V), so an image isn't injected twice.
+        const sig = clipboardSignature(clipboardData, fallbackText);
+        const now = Date.now();
+        const last = lastPasteRef.current;
+        if (last && last.sig === sig && now - last.at < DUPLICATE_PASTE_WINDOW_MS) {
+          claimPaste();
+          lastPasteRef.current = { sig, at: now };
+          return;
+        }
+        lastPasteRef.current = { sig, at: now };
+
         const imageFiles = extractClipboardImageFiles(clipboardData);
         if (imageFiles.length > 0) {
-          event.preventDefault();
+          claimPaste();
           void rpc.processHealth
             .record({
               kind: 'paste_image_files',
@@ -254,14 +341,33 @@ const PtyPaneComponent = forwardRef<{ focus: () => void }, Props>(
               });
             } catch (error) {
               log.warn('Terminal image paste failed', { error });
+              toast.error('Could not attach image');
             }
           })();
           return;
         }
 
-        if (!clipboardDataMayContainImage(clipboardData)) return;
+        // A "copy image" from Chrome (and many native apps) lands on the OS
+        // clipboard as raw image data, NOT a file item, and the DOM paste event
+        // often exposes no `image/*` type for it. In that case the checks above
+        // miss it. So: bail only when there is plain text to paste (a genuine
+        // text paste — leave it to xterm's native bracketed paste); otherwise
+        // treat an empty/imagey paste as a possible image and let the main
+        // process read it via the Electron clipboard (clipboard.readImage).
+        const mayContainImage = clipboardDataMayContainImage(clipboardData);
+        if (!mayContainImage && fallbackText) return;
 
-        event.preventDefault();
+        void rpc.processHealth
+          .record({
+            kind: 'paste_image_probe',
+            sessionId,
+            may_contain_image: mayContainImage,
+            types: clipboardData?.types?.join(',') ?? '',
+            fallback_text_len: fallbackText.length,
+          })
+          .catch(() => {});
+
+        claimPaste();
         void pasteClipboardImageOrText({
           sessionId,
           remoteConnectionId,
@@ -289,6 +395,7 @@ const PtyPaneComponent = forwardRef<{ focus: () => void }, Props>(
             await injectImagePaths(paths);
           } catch (error) {
             log.warn('Terminal drop failed', { error });
+            toast.error('Could not attach dropped file');
           }
         })();
       } catch (error) {

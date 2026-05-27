@@ -25,10 +25,17 @@ export function isHeicLikeFile(file: File): boolean {
 export function extractClipboardImageFiles(clipboardData: DataTransfer | null): File[] {
   if (!clipboardData?.items) return [];
   const imageFiles: File[] = [];
+  // Some sources expose the same image as more than one clipboard entry; dedupe
+  // by identity (name+size+mtime) so one paste doesn't inject the image twice.
+  const seen = new Set<string>();
   for (const item of clipboardData.items) {
     if (item.kind !== 'file') continue;
     const file = item.getAsFile();
-    if (file && isClipboardImageFile(file)) imageFiles.push(file);
+    if (!file || !isClipboardImageFile(file)) continue;
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    imageFiles.push(file);
   }
   return imageFiles;
 }
