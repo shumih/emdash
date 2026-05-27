@@ -9,6 +9,7 @@ import { resolveSshCommand } from '@main/core/pty/spawn-utils';
 import { openSsh2Pty } from '@main/core/pty/ssh2-pty';
 import { killTmuxSession, makeTmuxSessionName } from '@main/core/pty/tmux-session-name';
 import { providerOverrideSettings } from '@main/core/settings/provider-settings-service';
+import { resolveRemoteHome } from '@main/core/ssh/lifecycle/remote-shell-profile';
 import type { SshClientProxy } from '@main/core/ssh/lifecycle/ssh-client-proxy';
 import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
@@ -17,6 +18,8 @@ import type { AgentSessionConfig } from '@shared/agent-session';
 import type { Conversation } from '@shared/conversations';
 import { agentSessionExitedChannel } from '@shared/events/agentEvents';
 import { makePtySessionId } from '@shared/ptySessionId';
+import { listClaudeSessionIds, reconcileClaudeSessionId } from '../claude-transcript-locator';
+import { setProviderSessionId } from '../setProviderSessionId';
 import { buildAgentSessionCommand } from './agent-command';
 import { scheduleInitialPromptInjection } from './keystroke-injection';
 import { resolveProviderEnv } from './provider-env';
@@ -98,7 +101,12 @@ export class SshConversationProvider implements ConversationProvider {
       providerId: conversation.providerId,
       providerConfig,
       autoApprove: conversation.autoApprove,
-      sessionId: conversation.id,
+      // Resume by the real CLI session id once captured; the tondash conversation
+      // id is not reliably persisted under by the CLI (see provider-session-id).
+      sessionId:
+        isResuming && conversation.providerSessionId
+          ? conversation.providerSessionId
+          : conversation.id,
       sessionName: this.taskName,
       isResuming,
       initialPrompt,
@@ -130,6 +138,26 @@ export class SshConversationProvider implements ConversationProvider {
       { ...providerEnv, ...this.taskEnvVars },
       profile
     );
+
+    // SSH sessions don't have hooks wired, so the only way to recover the real
+    // Claude session id is to diff the remote transcript dir. Snapshot it before
+    // the session starts writing so we can attribute the new transcript to it.
+    const reconcileSessionId = conversation.providerId === 'claude';
+    let remoteFs: SshFileSystem | undefined;
+    let sessionIdsBefore = new Set<string>();
+    if (reconcileSessionId) {
+      try {
+        const remoteHome = await resolveRemoteHome(this.ctx);
+        remoteFs = new SshFileSystem(this.proxy, remoteHome);
+        sessionIdsBefore = await listClaudeSessionIds(remoteFs, this.taskPath);
+      } catch (err) {
+        log.warn('SshConversationProvider: failed to snapshot remote transcripts', {
+          conversationId: conversation.id,
+          error: String(err),
+        });
+        remoteFs = undefined;
+      }
+    }
 
     const result = await openSsh2Pty(this.proxy, {
       id: sessionId,
@@ -199,6 +227,22 @@ export class SshConversationProvider implements ConversationProvider {
     });
     this.sessions.set(sessionId, pty);
     scheduleInitialPromptInjection({ pty, conversation, initialPrompt, isResuming });
+
+    // Discover the real session id Claude wrote on the remote host and persist it
+    // for future --resume. This is the sole capture path for SSH (no hooks).
+    if (reconcileSessionId && remoteFs) {
+      const fs = remoteFs;
+      void reconcileClaudeSessionId({
+        fs,
+        cwd: this.taskPath,
+        before: sessionIdsBefore,
+        isAlive: () => this.sessions.get(sessionId) === pty,
+        onResolved: async (realSessionId) => {
+          await setProviderSessionId(conversation.id, realSessionId);
+        },
+      });
+    }
+
     telemetryService.capture('agent_run_started', {
       provider: conversation.providerId,
       project_id: conversation.projectId,

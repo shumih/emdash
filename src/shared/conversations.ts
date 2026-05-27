@@ -10,6 +10,12 @@ export type Conversation = {
   resume?: boolean;
   autoApprove?: boolean;
   isInitialConversation: boolean | null;
+  /**
+   * The real session id chosen by the agent CLI (e.g. Claude Code), captured at
+   * runtime. Used for --resume instead of the tondash-minted conversation id,
+   * which the CLI does not reliably persist under. Null until first captured.
+   */
+  providerSessionId?: string | null;
 };
 
 export type RenameConversationParams = {

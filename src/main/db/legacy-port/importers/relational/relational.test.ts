@@ -70,6 +70,7 @@ function createAppDb(): {
       title TEXT NOT NULL,
       provider TEXT,
       config TEXT,
+      provider_session_id TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_interacted_at TEXT,

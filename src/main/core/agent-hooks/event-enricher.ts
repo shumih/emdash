@@ -1,6 +1,8 @@
 import { eq } from 'drizzle-orm';
+import { setProviderSessionId } from '@main/core/conversations/setProviderSessionId';
 import { db } from '@main/db/client';
 import { conversations } from '@main/db/schema';
+import { log } from '@main/lib/logger';
 import type { AgentEvent } from '@shared/events/agentEvents';
 import { parsePtyId } from '@shared/ptyId';
 import type { RawHookRequest } from './hook-server';
@@ -42,6 +44,19 @@ export async function enrichEvent(raw: RawHookRequest): Promise<AgentEvent> {
   const projectId = convRows.projectId;
   const body = raw.body ? JSON.parse(raw.body) : {};
   const payload = normalizePayload(parsed.providerId, body);
+
+  // Claude Code (and compatible CLIs) include their real session id in every
+  // hook payload. Capture it so future --resume targets the id the CLI actually
+  // persisted its transcript under, instead of the tondash conversation id.
+  const providerSessionId = (body.session_id ?? body.sessionId) as string | undefined;
+  if (providerSessionId) {
+    void setProviderSessionId(parsed.conversationId, providerSessionId).catch((err) => {
+      log.warn('Failed to persist provider session id from hook', {
+        conversationId: parsed.conversationId,
+        error: String(err),
+      });
+    });
+  }
 
   return {
     type: raw.type as AgentEvent['type'],

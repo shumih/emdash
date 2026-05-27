@@ -285,6 +285,7 @@ export const conversations = sqliteTable(
     title: text('title').notNull(),
     provider: text('provider'),
     config: text('config'),
+    providerSessionId: text('provider_session_id'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

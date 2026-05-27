@@ -1,0 +1,1 @@
+ALTER TABLE `conversations` ADD `provider_session_id` text;

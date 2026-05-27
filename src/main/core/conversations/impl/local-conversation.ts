@@ -22,6 +22,8 @@ import type { Conversation } from '@shared/conversations';
 import { agentSessionExitedChannel } from '@shared/events/agentEvents';
 import { makePtyId } from '@shared/ptyId';
 import { makePtySessionId } from '@shared/ptySessionId';
+import { listClaudeSessionIds, reconcileClaudeSessionId } from '../claude-transcript-locator';
+import { setProviderSessionId } from '../setProviderSessionId';
 import { buildAgentSessionCommand } from './agent-command';
 import { scheduleInitialPromptInjection } from './keystroke-injection';
 import { resolveProviderEnv } from './provider-env';
@@ -111,7 +113,12 @@ export class LocalConversationProvider implements ConversationProvider {
       providerId: conversation.providerId,
       providerConfig,
       autoApprove: conversation.autoApprove,
-      sessionId: conversation.id,
+      // Resume by the real CLI session id once captured; the tondash conversation
+      // id is not reliably persisted under by the CLI (see provider-session-id).
+      sessionId:
+        isResuming && conversation.providerSessionId
+          ? conversation.providerSessionId
+          : conversation.id,
       sessionName: this.taskName,
       isResuming,
       initialPrompt,
@@ -143,6 +150,14 @@ export class LocalConversationProvider implements ConversationProvider {
     const ptyId = makePtyId(conversation.providerId, conversation.id);
     const port = agentHookService.getPort();
     const token = agentHookService.getToken();
+
+    // Snapshot existing Claude transcripts for this cwd so we can later attribute
+    // the newly-created one to this conversation and capture its real session id.
+    const reconcileSessionId = conversation.providerId === 'claude';
+    const sessionIdsBefore = reconcileSessionId
+      ? await listClaudeSessionIds(new LocalFileSystem(homedir()), resolved.cwd)
+      : new Set<string>();
+
     const pty = spawnLocalPty({
       id: sessionId,
       command: resolved.command,
@@ -201,8 +216,10 @@ export class LocalConversationProvider implements ConversationProvider {
          * --resume failed: the provider has no transcript for this session id
          * (its store was cleared, or the id was never persisted — e.g. a crash
          * before the first turn). Retrying --resume can never succeed, so fall
-         * back to a fresh session that reuses the same session id. The task
-         * stays usable and a new transcript is written under the same id.
+         * back to a fresh session. The CLI picks its own real session id for the
+         * fresh transcript; that id is captured via the hook (and the transcript
+         * reconciler) and persisted as providerSessionId, so the next --resume
+         * targets it and succeeds.
          */
         log.warn('LocalConversationProvider: resume failed, starting fresh session', {
           conversationId: conversation.id,
@@ -238,6 +255,22 @@ export class LocalConversationProvider implements ConversationProvider {
     });
     this.sessions.set(sessionId, pty);
     scheduleInitialPromptInjection({ pty, conversation, initialPrompt, isResuming });
+
+    // Backstop for the hook-based capture: discover the real session id Claude
+    // wrote its transcript under and persist it for future --resume. Harmless if
+    // the hook already captured it (the write is idempotent).
+    if (reconcileSessionId) {
+      void reconcileClaudeSessionId({
+        fs: new LocalFileSystem(homedir()),
+        cwd: resolved.cwd,
+        before: sessionIdsBefore,
+        isAlive: () => this.sessions.get(sessionId) === pty,
+        onResolved: async (realSessionId) => {
+          await setProviderSessionId(conversation.id, realSessionId);
+        },
+      });
+    }
+
     telemetryService.capture('agent_run_started', {
       provider: conversation.providerId,
       project_id: conversation.projectId,
