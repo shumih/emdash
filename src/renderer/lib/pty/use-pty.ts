@@ -367,6 +367,22 @@ export function usePty(
       // rAF so it reads the live DOM and only calls term.resize() when needed.
       measureAndResize();
 
+      // On first mount / tab activation the container can still be settling its
+      // final size (flex layout, sidebar toggle, async content), so a single
+      // measure may read a stale width and leave the (remote) PTY at the wrong
+      // column count — the TUI then wraps at the wrong place and renders
+      // garbled. Re-measure across the next frames to converge on the settled
+      // size. measureAndResize is idempotent (resizes only on change), so the
+      // extra passes are cheap and self-cancel once dimensions match.
+      const resyncRaf = requestAnimationFrame(() => measureAndResizeRef.current());
+      const resyncTimers = [80, 200, 400].map((delay) =>
+        setTimeout(() => measureAndResizeRef.current(), delay)
+      );
+      cleanups.push(() => {
+        cancelAnimationFrame(resyncRaf);
+        for (const id of resyncTimers) clearTimeout(id);
+      });
+
       // ── Load settings ──────────────────────────────────────────────────────
       let customFontFamily = '';
       void (rpc.appSettings.get('terminal') as Promise<AppSettings['terminal']>).then(
