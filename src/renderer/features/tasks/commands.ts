@@ -38,6 +38,7 @@ export function createTaskCommandProvider(projectId: string, taskId: string): Co
       const taskData = getRegisteredTaskData(projectId, taskId);
 
       const newConversationDef = taskDef('task.newConversation');
+      const addSharedSessionDef = taskDef('task.addSharedSession');
       const sidebarChangesDef = taskDef('task.sidebarChanges');
       const sidebarConversationsDef = taskDef('task.sidebarConversations');
       const sidebarFilesDef = taskDef('task.sidebarFiles');
@@ -66,6 +67,22 @@ export function createTaskCommandProvider(projectId: string, taskId: string): Co
               taskId,
               onSuccess: ({ conversationId }) => {
                 taskView?.tabGroupManager.openConversation(conversationId);
+                taskView?.setFocusedRegion('main');
+              },
+            });
+          },
+        },
+        {
+          id: addSharedSessionDef.id,
+          label: addSharedSessionDef.label,
+          description: addSharedSessionDef.description,
+          shortcutKey: addSharedSessionDef.shortcutKey,
+          group: addSharedSessionDef.group,
+          execute() {
+            showModal('applySharedSessionModal', {
+              projectId,
+              taskId,
+              onSuccess: () => {
                 taskView?.setFocusedRegion('main');
               },
             });

@@ -32,6 +32,9 @@ export async function createConversation(params: CreateConversationParams): Prom
       title: params.title,
       provider: params.provider,
       config,
+      providerSessionId: params.providerSessionId,
+      sourceShareId: params.sourceShareId,
+      sourceTargetProvider: params.sourceTargetProvider,
       isInitialConversation: params.isInitialConversation ?? false,
       createdAt: sql`CURRENT_TIMESTAMP`,
       updatedAt: sql`CURRENT_TIMESTAMP`,
@@ -44,14 +47,14 @@ export async function createConversation(params: CreateConversationParams): Prom
     throw new Error('Task not found');
   }
 
-  const conversation = mapConversationRowToConversation(row);
+  const conversation = mapConversationRowToConversation(row, params.resume ?? false);
 
   await withCompensation({
     action: () =>
       task.conversations.startSession(
         conversation,
         params.initialSize,
-        false,
+        params.resume ?? false,
         params.initialPrompt
       ),
     compensate: async () => {

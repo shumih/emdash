@@ -77,6 +77,18 @@ export interface ReadResult {
 }
 
 /**
+ * Result of a binary file read operation
+ */
+export interface ReadBytesResult {
+  /** File content as base64 (binary-safe) */
+  base64: string;
+  /** Whether the content was truncated due to maxBytes limit */
+  truncated: boolean;
+  /** Total file size in bytes */
+  totalSize: number;
+}
+
+/**
  * Result of a file write operation
  */
 export interface WriteResult {
@@ -164,6 +176,23 @@ export interface FileSystemProvider {
    * @returns Promise resolving to write result
    */
   write(path: string, content: string): Promise<WriteResult>;
+
+  /**
+   * Read entire file as base64 (binary-safe). Use for binary payloads such as
+   * Cursor's SQLite `store.db`, where the UTF-8 `read()` path would corrupt the
+   * bytes. Optional — both LocalFileSystem and SshFileSystem implement it.
+   * @param path - File path relative to project root
+   * @param maxBytes - Maximum bytes to read (default: 64MB)
+   */
+  readBytes?(path: string, maxBytes?: number): Promise<ReadBytesResult>;
+
+  /**
+   * Write base64-decoded bytes to a file (binary-safe), creating parent dirs.
+   * Counterpart to readBytes for round-tripping binary transcripts.
+   * @param path - File path relative to project root
+   * @param base64 - Base64-encoded content to write
+   */
+  writeBytes?(path: string, base64: string): Promise<WriteResult>;
 
   /**
    * Check if a path exists

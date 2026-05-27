@@ -17,5 +17,7 @@ export function mapConversationRowToConversation(
     lastInteractedAt: row.lastInteractedAt ?? null,
     isInitialConversation: row.isInitialConversation,
     providerSessionId: row.providerSessionId ?? null,
+    sourceShareId: row.sourceShareId ?? null,
+    sourceTargetProvider: row.sourceTargetProvider ?? null,
   };
 }

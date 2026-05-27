@@ -14,6 +14,7 @@ import {
   type FileSystemProvider,
   type FileWatcher,
   type ListOptions,
+  type ReadBytesResult,
   type ReadResult,
   type SearchMatch,
   type SearchOptions,
@@ -403,6 +404,71 @@ export class LocalFileSystem implements FileSystemProvider {
       success: true,
       bytesWritten: stat.size,
     };
+  }
+
+  async readBytes(path: string, maxBytes: number = 64 * 1024 * 1024): Promise<ReadBytesResult> {
+    const fullPath = this.resolvePath(path);
+
+    let stat;
+    try {
+      stat = await fs.stat(fullPath);
+    } catch {
+      throw new FileSystemError(`File not found: ${path}`, FileSystemErrorCodes.NOT_FOUND, path);
+    }
+
+    if (stat.isDirectory()) {
+      throw new FileSystemError(
+        `Path is a directory: ${path}`,
+        FileSystemErrorCodes.IS_DIRECTORY,
+        path
+      );
+    }
+
+    if (stat.size > maxBytes) {
+      const fd = await fs.open(fullPath, 'r');
+      try {
+        const buffer = Buffer.alloc(maxBytes);
+        const { bytesRead } = await fd.read(buffer, 0, maxBytes, 0);
+        return {
+          base64: buffer.subarray(0, bytesRead).toString('base64'),
+          truncated: true,
+          totalSize: stat.size,
+        };
+      } finally {
+        await fd.close();
+      }
+    }
+
+    const buffer = await fs.readFile(fullPath);
+    return { base64: buffer.toString('base64'), truncated: false, totalSize: stat.size };
+  }
+
+  async writeBytes(path: string, base64: string): Promise<WriteResult> {
+    const fullPath = this.resolvePath(path);
+    const dir = dirname(fullPath);
+    try {
+      await fs.mkdir(dir, { recursive: true });
+    } catch (err) {
+      log.error('Failed to create directory', { dir, error: err });
+      throw new FileSystemError(
+        `Failed to create directory: ${dir}`,
+        FileSystemErrorCodes.PERMISSION_DENIED,
+        path
+      );
+    }
+
+    const buffer = Buffer.from(base64, 'base64');
+    try {
+      await fs.writeFile(fullPath, buffer);
+    } catch (err) {
+      log.error('Failed to write file', { path, error: err });
+      throw new FileSystemError(
+        `Failed to write file: ${path}`,
+        FileSystemErrorCodes.PERMISSION_DENIED,
+        path
+      );
+    }
+    return { success: true, bytesWritten: buffer.length };
   }
 
   async exists(path: string): Promise<boolean> {

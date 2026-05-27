@@ -13,6 +13,16 @@ vi.mock('@main/lib/events', () => ({
   },
 }));
 
+// ptySessionRegistry → process-health-monitor → telemetry transitively imports
+// @main/db/client, whose module-load `new Database(resolveDatabasePath())` calls
+// electron's app.getPath and crashes under the plain-Node test runtime (which
+// also can't load the Electron-compiled better-sqlite3). Stub the client so the
+// import graph resolves without opening a real database.
+vi.mock('@main/db/client', () => ({
+  db: {},
+  sqlite: {},
+}));
+
 class FakePty implements Pty {
   writes: string[] = [];
   private exitHandlers: Array<(info: PtyExitInfo) => void> = [];

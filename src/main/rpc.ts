@@ -26,6 +26,7 @@ import { resourceMonitorController } from './core/resource-monitor/controller';
 import { searchController } from './core/search/controller';
 import { appSettingsController } from './core/settings/controller';
 import { providerSettingsController } from './core/settings/provider-settings-controller';
+import { sharedSessionsController } from './core/shared-sessions/controller';
 import { skillsController } from './core/skills/controller';
 import { sshController } from './core/ssh/controller';
 import { taskController } from './core/tasks/controller';
@@ -75,6 +76,7 @@ export const rpcRouter = createRPCRouter({
   search: searchController,
   workspaces: workspaceController,
   projectSettings: projectSettingsController,
+  sharedSessions: sharedSessionsController,
 });
 
 export type RpcRouter = typeof rpcRouter;
