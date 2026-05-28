@@ -142,8 +142,8 @@ export function CommandPaletteModal({
 
   useEffect(() => {
     if (view !== 'resource-monitor') return;
-    appState.resourceMonitor.start();
-    return () => appState.resourceMonitor.dispose();
+    appState.resourceMonitor.acquire();
+    return () => appState.resourceMonitor.release();
   }, [view]);
 
   // Prefetch recents immediately on mount so the empty-query view is instant.
