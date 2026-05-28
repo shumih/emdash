@@ -10,6 +10,7 @@ export class ResourceMonitorStore {
   private clientId = crypto.randomUUID();
   private sequence = 0;
   private subscriptionId: string | null = null;
+  private refCount = 0;
 
   constructor() {
     makeObservable(this, {
@@ -88,6 +89,23 @@ export class ResourceMonitorStore {
     }
   }
 
+  /**
+   * Reference-counted entry point for consumers (command palette view, task
+   * titlebar badges). The stream is opened on the first acquire and closed on
+   * the last release, so multiple independent consumers don't tear down each
+   * other's subscription.
+   */
+  acquire(): void {
+    this.refCount += 1;
+    if (this.refCount === 1) this.start();
+  }
+
+  release(): void {
+    if (this.refCount === 0) return;
+    this.refCount -= 1;
+    if (this.refCount === 0) this.dispose();
+  }
+
   async refresh(): Promise<void> {
     const res = await rpc.resourceMonitor.getSnapshot();
     if (!res?.success) return;
@@ -105,5 +123,32 @@ export class ResourceMonitorStore {
   normalizedCpu(entry: ResourcePtyEntry): number {
     if (!this.snapshot || this.snapshot.cpuCount === 0) return 0;
     return entry.cpu / this.snapshot.cpuCount;
+  }
+
+  /**
+   * Aggregate resource usage for a single task (all its conversation/terminal
+   * PTYs). `cpu` is normalized to all cores; `memoryBytes` is summed RSS.
+   * `localCount` counts entries with a real OS pid — remote (SSH) PTYs have
+   * `pid === undefined` and report 0/0, so a task with `localCount === 0` has
+   * no local footprint to display.
+   */
+  usageForTask(
+    projectId: string,
+    taskId: string
+  ): { cpu: number; memoryBytes: number; localCount: number; entries: ResourcePtyEntry[] } {
+    const snap = this.snapshot;
+    const entries = snap
+      ? snap.entries.filter((e) => e.projectId === projectId && e.scopeId === taskId)
+      : [];
+    let cpuSum = 0;
+    let memoryBytes = 0;
+    let localCount = 0;
+    for (const e of entries) {
+      cpuSum += e.cpu;
+      memoryBytes += e.memory;
+      if (typeof e.pid === 'number') localCount += 1;
+    }
+    const cpu = snap && snap.cpuCount > 0 ? cpuSum / snap.cpuCount : 0;
+    return { cpu, memoryBytes, localCount, entries };
   }
 }
