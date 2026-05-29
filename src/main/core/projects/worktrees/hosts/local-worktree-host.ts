@@ -172,6 +172,16 @@ export class LocalWorktreeHost implements WorktreeHost {
     await fs.copyFile(safeSrc, safeDest);
   }
 
+  async symlinkAbsolute(target: string, linkPath: string): Promise<void> {
+    const safeTarget = await this.validateExisting(target);
+    const safeLink = await this.validateTarget(linkPath);
+    const stat = await fs.stat(safeTarget);
+    // On Windows, directory symlinks require an explicit type ('junction'
+    // avoids the developer-mode/elevation requirement). POSIX ignores it.
+    const type = stat.isDirectory() ? (process.platform === 'win32' ? 'junction' : 'dir') : 'file';
+    await fs.symlink(safeTarget, safeLink, type);
+  }
+
   async statAbsolute(filePath: string): Promise<FileEntry | null> {
     try {
       const fullPath = await this.validateExisting(filePath);

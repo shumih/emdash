@@ -5,7 +5,7 @@ import {
   type FileEntry,
   type FileSystemProvider,
 } from '@main/core/fs/types';
-import type { WorktreeHost } from './worktree-host';
+import { WorktreeSymlinkUnsupportedError, type WorktreeHost } from './worktree-host';
 
 type SshWorktreeFs = Pick<
   FileSystemProvider,
@@ -58,6 +58,12 @@ export class SshWorktreeHost implements WorktreeHost {
 
   async copyFileAbsolute(src: string, dest: string): Promise<void> {
     return this.fs.copyFile(this.validateAbsolute(src), this.validateAbsolute(dest));
+  }
+
+  async symlinkAbsolute(_target: string, _linkPath: string): Promise<void> {
+    // Remote SSH worktrees fall back to copying preserved files; sharing large
+    // directories via symlink over SFTP is not implemented.
+    throw new WorktreeSymlinkUnsupportedError();
   }
 
   async statAbsolute(filePath: string): Promise<FileEntry | null> {

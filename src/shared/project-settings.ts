@@ -11,6 +11,8 @@ export const DEFAULT_PRESERVE_PATTERNS = [
   'docker-compose.override.yml',
 ] as const;
 
+export const DEFAULT_SYMLINK_PATTERNS = ['node_modules'] as const;
+
 export const defaultBranchSettingSchema = z.union([
   z.string(),
   z.object({ name: z.string(), remote: z.literal(true) }),
@@ -22,6 +24,10 @@ const preservePatternsSchema = z
   .array(z.string())
   .transform((patterns) => patterns.filter((pattern) => pattern !== PROJECT_CONFIG_FILE));
 
+const symlinkPatternsSchema = z
+  .array(z.string())
+  .transform((patterns) => patterns.filter((pattern) => pattern !== PROJECT_CONFIG_FILE));
+
 export const shareableProjectScriptsSettingsSchema = z.object({
   setup: z.string().optional(),
   run: z.string().optional(),
@@ -30,12 +36,14 @@ export const shareableProjectScriptsSettingsSchema = z.object({
 
 export const shareableProjectSettingsSchema = z.object({
   preservePatterns: preservePatternsSchema.optional(),
+  symlinkPatterns: symlinkPatternsSchema.optional(),
   shellSetup: z.string().optional(),
   scripts: shareableProjectScriptsSettingsSchema.optional(),
 });
 
 export const shareableProjectSettingsWithDefaultsSchema = shareableProjectSettingsSchema.extend({
   preservePatterns: preservePatternsSchema.default([...DEFAULT_PRESERVE_PATTERNS]),
+  symlinkPatterns: symlinkPatternsSchema.default([...DEFAULT_SYMLINK_PATTERNS]),
 });
 
 export type ShareableProjectSettings = z.infer<typeof shareableProjectSettingsSchema>;
@@ -98,6 +106,7 @@ export type ProjectSettingsWriteTargetOption = ProjectSettingsWriteTarget & {
 
 export type ShareableProjectSettingsWriteField =
   | 'preservePatterns'
+  | 'symlinkPatterns'
   | 'shellSetup'
   | 'scripts.setup'
   | 'scripts.run'
@@ -105,6 +114,7 @@ export type ShareableProjectSettingsWriteField =
 
 export const SHAREABLE_PROJECT_SETTINGS_WRITE_FIELDS = [
   'preservePatterns',
+  'symlinkPatterns',
   'shellSetup',
   'scripts.setup',
   'scripts.run',
@@ -152,6 +162,7 @@ export type MigrateProjectConfigResult = {
 export function emptyProjectSettingsOverrideState(): ProjectSettingsOverrideState {
   return {
     preservePatterns: [],
+    symlinkPatterns: [],
     shellSetup: [],
     'scripts.setup': [],
     'scripts.run': [],

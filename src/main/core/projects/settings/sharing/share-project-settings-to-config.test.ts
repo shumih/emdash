@@ -534,6 +534,7 @@ describe('shareProjectSettingsToConfig', () => {
           value: '.env\n.env.local',
         },
       ],
+      symlinkPatterns: [],
       shellSetup: [
         {
           label: 'Repo Name',

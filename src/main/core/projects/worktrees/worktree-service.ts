@@ -8,7 +8,7 @@ import { DEFAULT_REMOTE_NAME } from '@shared/git-utils';
 import { err, ok, type Result } from '@shared/result';
 import { getEffectiveTaskSettings } from '../settings/effective-task-settings';
 import type { ProjectSettingsProvider } from '../settings/provider';
-import type { WorktreeHost } from './hosts/worktree-host';
+import { WorktreeSymlinkUnsupportedError, type WorktreeHost } from './hosts/worktree-host';
 
 export type ServeWorktreeError =
   | { type: 'worktree-setup-failed'; cause: unknown }
@@ -201,8 +201,8 @@ export class WorktreeService {
       return err({ type: 'worktree-setup-failed', cause });
     }
 
-    await this.copyPreservedFiles(targetPath).catch((e) => {
-      log.warn('WorktreeService: failed to copy preserved files', {
+    await this.populateWorktreeFromRoot(targetPath).catch((e) => {
+      log.warn('WorktreeService: failed to populate worktree from root', {
         targetPath,
         error: String(e),
       });
@@ -274,8 +274,8 @@ export class WorktreeService {
       return err({ type: 'worktree-setup-failed', cause });
     }
 
-    await this.copyPreservedFiles(targetPath).catch((e) => {
-      log.warn('WorktreeService: failed to copy preserved files', {
+    await this.populateWorktreeFromRoot(targetPath).catch((e) => {
+      log.warn('WorktreeService: failed to populate worktree from root', {
         targetPath,
         error: String(e),
       });
@@ -316,12 +316,36 @@ export class WorktreeService {
     }
   }
 
-  private async copyPreservedFiles(targetPath: string): Promise<void> {
+  /**
+   * Seed a freshly created worktree from the main checkout: copy preserved
+   * untracked files (e.g. `.env`) and symlink shared directories (e.g.
+   * `node_modules`) so imports and prebuilt native modules work without a
+   * reinstall. Each step is isolated so one failure does not block the other.
+   */
+  private async populateWorktreeFromRoot(targetPath: string): Promise<void> {
     const settings = await getEffectiveTaskSettings({
       projectSettings: this.projectSettings,
       taskFs: this.taskConfigFs(targetPath) as FileSystemProvider,
     });
-    const patterns = settings.preservePatterns ?? [];
+    await this.copyPreservedFiles(targetPath, settings.preservePatterns ?? []).catch((e) => {
+      log.warn('WorktreeService: failed to copy preserved files', {
+        targetPath,
+        error: String(e),
+      });
+    });
+    await this.linkSharedPaths(
+      targetPath,
+      settings.symlinkPatterns ?? [],
+      settings.scripts?.setup
+    ).catch((e) => {
+      log.warn('WorktreeService: failed to link shared paths', {
+        targetPath,
+        error: String(e),
+      });
+    });
+  }
+
+  private async copyPreservedFiles(targetPath: string, patterns: string[]): Promise<void> {
     for (const pattern of patterns) {
       const matches = await this.host.globAbsolute(pattern, {
         cwd: this.repoPath,
@@ -338,6 +362,71 @@ export class WorktreeService {
       }
     }
   }
+
+  /**
+   * Symlink configured paths (default `node_modules`) from the main checkout
+   * into the worktree. A single symlink shares both resolvable imports and the
+   * already-built native modules (same Electron ABI) at no cost. Existing paths
+   * (e.g. anything git checked out) are never clobbered.
+   */
+  private async linkSharedPaths(
+    targetPath: string,
+    patterns: string[],
+    setupScript: string | undefined
+  ): Promise<void> {
+    if (patterns.length === 0) return;
+    let linkedDependencyDir = false;
+    for (const pattern of patterns) {
+      const matches = await this.host.globAbsolute(pattern, {
+        cwd: this.repoPath,
+        dot: true,
+      });
+      for (const relPath of matches) {
+        if (relPath === '.emdash.json') continue;
+        const src = path.join(this.repoPath, relPath);
+        const dest = path.join(targetPath, relPath);
+        if (await this.host.existsAbsolute(dest)) continue;
+        const stat = await this.host.statAbsolute(src).catch(() => null);
+        if (!stat) continue;
+        try {
+          await this.host.mkdirAbsolute(path.dirname(dest), { recursive: true });
+          await this.host.symlinkAbsolute(src, dest);
+          if (DEPENDENCY_DIR_PATTERN.test(relPath)) linkedDependencyDir = true;
+        } catch (e) {
+          if (e instanceof WorktreeSymlinkUnsupportedError) {
+            log.info('WorktreeService: host does not support symlinks; skipping symlinkPatterns', {
+              targetPath,
+            });
+            return;
+          }
+          log.warn('WorktreeService: failed to symlink shared path', {
+            src,
+            dest,
+            error: String(e),
+          });
+        }
+      }
+    }
+    if (linkedDependencyDir && setupScriptInstalls(setupScript)) {
+      log.warn(
+        'WorktreeService: a dependency directory was symlinked into the worktree while a setup ' +
+          'script installs dependencies. Installing here mutates the shared copy; replace the ' +
+          'symlink with a real install only when the branch changes dependencies.',
+        { targetPath }
+      );
+    }
+  }
+}
+
+/** Matches dependency directories whose contents are shared via symlink. */
+const DEPENDENCY_DIR_PATTERN = /(?:^|\/)(?:node_modules|\.venv|vendor)(?:\/|$)/;
+
+/** Heuristic: does a setup script install dependencies (would mutate a shared dir)? */
+function setupScriptInstalls(script: string | undefined): boolean {
+  if (!script) return false;
+  return /\b(?:npm|pnpm|yarn|bun)\s+(?:install|i|ci)\b|\b(?:pip|poetry|uv|pipenv)\b|\binstall\b/.test(
+    script
+  );
 }
 
 /**

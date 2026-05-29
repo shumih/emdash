@@ -26,9 +26,12 @@ async function initRepo(dir: string): Promise<void> {
   await git(['commit', '--allow-empty', '-m', 'init'], { cwd: dir });
 }
 
-function makeSettings(preservePatterns: string[] = []): ProjectSettingsProvider {
+function makeSettings(
+  preservePatterns: string[] = [],
+  symlinkPatterns: string[] = []
+): ProjectSettingsProvider {
   return {
-    get: async () => ({ preservePatterns }),
+    get: async () => ({ preservePatterns, symlinkPatterns }),
     update: async () => ok(),
     patch: async () => ok(),
     ensure: async () => {},
@@ -244,5 +247,62 @@ describe('WorktreeService', () => {
         fs.rmSync(remoteDir, { recursive: true, force: true });
       }
     }, 15_000);
+  });
+
+  describe('symlinkPatterns', () => {
+    it('symlinks an untracked directory from the repo root into the worktree', async () => {
+      const nodeModules = path.join(repoDir, 'node_modules');
+      fs.mkdirSync(nodeModules, { recursive: true });
+      fs.writeFileSync(path.join(nodeModules, 'dep.js'), 'module.exports = 42;');
+      await git(['branch', 'task/symlink-deps'], { cwd: repoDir });
+      const svc = makeService({ projectSettings: makeSettings([], ['node_modules']) });
+
+      const result = await svc.checkoutBranchWorktree(
+        { type: 'local', branch: 'main' },
+        'task/symlink-deps'
+      );
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('expected success');
+      const linked = path.join(result.data, 'node_modules');
+      expect(fs.lstatSync(linked).isSymbolicLink()).toBe(true);
+      expect(fs.readFileSync(path.join(linked, 'dep.js'), 'utf8')).toContain('42');
+    });
+
+    it('skips patterns that do not exist in the repo root', async () => {
+      await git(['branch', 'task/symlink-missing'], { cwd: repoDir });
+      const svc = makeService({ projectSettings: makeSettings([], ['node_modules', '.venv']) });
+
+      const result = await svc.checkoutBranchWorktree(
+        { type: 'local', branch: 'main' },
+        'task/symlink-missing'
+      );
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('expected success');
+      expect(fs.existsSync(path.join(result.data, 'node_modules'))).toBe(false);
+      expect(fs.existsSync(path.join(result.data, '.venv'))).toBe(false);
+    });
+
+    it('does not clobber a tracked path checked out into the worktree', async () => {
+      const trackedDir = path.join(repoDir, 'vendor');
+      fs.mkdirSync(trackedDir, { recursive: true });
+      fs.writeFileSync(path.join(trackedDir, 'lib.js'), 'tracked');
+      await git(['add', 'vendor/lib.js'], { cwd: repoDir });
+      await git(['commit', '-m', 'add vendor'], { cwd: repoDir });
+      await git(['branch', 'task/symlink-tracked'], { cwd: repoDir });
+      const svc = makeService({ projectSettings: makeSettings([], ['vendor']) });
+
+      const result = await svc.checkoutBranchWorktree(
+        { type: 'local', branch: 'main' },
+        'task/symlink-tracked'
+      );
+
+      expect(result.success).toBe(true);
+      if (!result.success) throw new Error('expected success');
+      const dest = path.join(result.data, 'vendor');
+      expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false);
+      expect(fs.readFileSync(path.join(dest, 'lib.js'), 'utf8')).toBe('tracked');
+    });
   });
 });

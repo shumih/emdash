@@ -1,5 +1,6 @@
 import {
   DEFAULT_PRESERVE_PATTERNS,
+  DEFAULT_SYMLINK_PATTERNS,
   SHAREABLE_PROJECT_SETTINGS_WRITE_FIELDS,
   type ProjectSettings,
   type ShareableProjectSettings,
@@ -42,11 +43,22 @@ export function hasDefaultPreservePatterns(settings: ShareableProjectSettings): 
   return DEFAULT_PRESERVE_PATTERNS.every((pattern) => patternSet.has(pattern));
 }
 
+export function hasDefaultSymlinkPatterns(settings: ShareableProjectSettings): boolean {
+  const patterns = normalizePatterns(settings.symlinkPatterns);
+  if (patterns.length !== DEFAULT_SYMLINK_PATTERNS.length) return false;
+  const patternSet = new Set(patterns);
+  return DEFAULT_SYMLINK_PATTERNS.every((pattern) => patternSet.has(pattern));
+}
+
 export function hasConfiguredShareableProjectSettings(settings: ProjectSettings): boolean {
   return SHAREABLE_PROJECT_SETTINGS_WRITE_FIELDS.some((field) => {
     if (field === 'preservePatterns') {
       const patterns = normalizePatterns(settings.preservePatterns);
       return patterns.length > 0 && !hasDefaultPreservePatterns(settings);
+    }
+    if (field === 'symlinkPatterns') {
+      const patterns = normalizePatterns(settings.symlinkPatterns);
+      return patterns.length > 0 && !hasDefaultSymlinkPatterns(settings);
     }
     return SHAREABLE_FIELD_ACCESSORS[field].displayValue(settings) !== null;
   });
@@ -64,6 +76,20 @@ export const SHAREABLE_FIELD_ACCESSORS = {
     },
     displayValue: (settings) => {
       const value = normalizePatterns(settings.preservePatterns);
+      return value?.length ? value.join('\n') : null;
+    },
+  },
+  symlinkPatterns: {
+    path: ['symlinkPatterns'],
+    get: (settings) => settings.symlinkPatterns,
+    set: (settings, value) => {
+      settings.symlinkPatterns = value as string[] | undefined;
+    },
+    clear: (settings) => {
+      delete settings.symlinkPatterns;
+    },
+    displayValue: (settings) => {
+      const value = normalizePatterns(settings.symlinkPatterns);
       return value?.length ? value.join('\n') : null;
     },
   },
@@ -123,6 +149,7 @@ export function clearShareableProjectSettingsFields<T extends ProjectSettings>(
   const next: ProjectSettings = {
     ...settings,
     preservePatterns: settings.preservePatterns ? [...settings.preservePatterns] : undefined,
+    symlinkPatterns: settings.symlinkPatterns ? [...settings.symlinkPatterns] : undefined,
     scripts: settings.scripts ? { ...settings.scripts } : undefined,
   };
 
