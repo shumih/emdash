@@ -171,23 +171,36 @@ export class ConversationManagerStore implements IDisposable {
     return null;
   }
 
+  /** Add a conversation's data + session stores to the maps (idempotent). */
+  private registerConversation(conversation: Conversation): void {
+    if (!this.conversations.has(conversation.id)) {
+      this.conversations.set(conversation.id, new ConversationStore(conversation));
+    }
+    if (!this.sessions.has(conversation.id)) {
+      this.sessions.set(
+        conversation.id,
+        new PtySession(
+          makePtySessionId(conversation.projectId, conversation.taskId, conversation.id)
+        )
+      );
+    }
+  }
+
   async createConversation(params: CreateConversationParams): Promise<Conversation> {
     const conversation = await rpc.conversations.createConversation(params);
     runInAction(() => {
-      if (!this.conversations.has(conversation.id)) {
-        this.conversations.set(conversation.id, new ConversationStore(conversation));
-      }
-      if (!this.sessions.has(conversation.id)) {
-        this.sessions.set(
-          conversation.id,
-          new PtySession(
-            makePtySessionId(conversation.projectId, conversation.taskId, conversation.id)
-          )
-        );
-      }
+      this.registerConversation(conversation);
       if (params.initialPrompt?.trim()) {
         this.conversations.get(conversation.id)?.setWorking();
       }
+    });
+    return conversation;
+  }
+
+  async forkConversation(conversationId: string, title: string): Promise<Conversation> {
+    const conversation = await rpc.conversations.forkConversation({ conversationId, title });
+    runInAction(() => {
+      this.registerConversation(conversation);
     });
     return conversation;
   }

@@ -27,6 +27,23 @@ export type RenameConversationParams = {
   newTitle: string;
 };
 
+export type ForkConversationParams = {
+  conversationId: string;
+  title: string;
+};
+
+/**
+ * Providers a session can be forked for: their transcript is a single text file
+ * we can copy under a new id. Claude is full-fidelity (resume by id); Codex is
+ * best-effort (copy becomes newest for `resume --last`). Cursor (binary SQLite)
+ * is excluded.
+ */
+export function isForkableProvider(
+  providerId: string | null | undefined
+): providerId is 'claude' | 'codex' {
+  return providerId === 'claude' || providerId === 'codex';
+}
+
 export type CreateConversationParams = {
   id: string;
   projectId: string;

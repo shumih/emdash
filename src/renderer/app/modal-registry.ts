@@ -12,6 +12,7 @@ import { ShareSessionModal } from '@renderer/features/shared-sessions/share-sess
 import { CreateSkillModal } from '@renderer/features/skills/components/CreateSkillModal';
 import { AddRemoteModal } from '@renderer/features/tasks/add-remote-modal';
 import { CreateConversationModal } from '@renderer/features/tasks/conversations/create-conversation-modal';
+import { ForkConversationModal } from '@renderer/features/tasks/conversations/fork-conversation-modal';
 import { CreateTaskModal } from '@renderer/features/tasks/create-task-modal/create-task-modal';
 import { DeleteTaskModal } from '@renderer/features/tasks/delete-task-modal';
 import { CreatePrModal } from '@renderer/features/tasks/diff-view/changes-panel/components/pr-entry/create-pr-modal';
@@ -51,6 +52,7 @@ export const modalRegistry = {
   confirmActionModal: createModal(ConfirmActionDialog, { size: 'xs' }),
   unsavedChangesModal: createModal(UnsavedChangesDialog, { size: 'xs' }),
   createConversationModal: createModal(CreateConversationModal),
+  forkConversationModal: createModal(ForkConversationModal, { size: 'xs' }),
   feedbackModal: createModal(FeedbackModal),
   promptModal: createModal(PromptModal, { size: 'lg' }),
   mcpServerModal: createModal(McpModal),

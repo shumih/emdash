@@ -1,4 +1,4 @@
-import { Pencil } from 'lucide-react';
+import { GitFork, Pencil } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useRef, useState } from 'react';
 import AgentLogo from '@renderer/lib/components/agent-logo';
@@ -10,6 +10,7 @@ import {
 } from '@renderer/lib/ui/context-menu';
 import { Separator } from '@renderer/lib/ui/separator';
 import { agentConfig } from '@renderer/utils/agentConfig';
+import { isForkableProvider } from '@shared/conversations';
 import { AgentStatusIndicator } from '../../components/agent-status-indicator';
 import { formatConversationTitleForDisplay } from '../../conversations/conversation-title-utils';
 import type { ResolvedConversationTab } from '../../tabs/tab-manager-store';
@@ -23,15 +24,18 @@ export const ConversationTabItem = observer(function ConversationTabItem({
   onPin,
   onClose,
   onRenameSubmit,
+  onFork,
 }: {
   tab: ResolvedConversationTab;
   onSelect: () => void;
   onPin: () => void;
   onClose: () => void;
   onRenameSubmit: (newName: string) => void;
+  onFork: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const pendingRenameRef = useRef(false);
+  const pendingForkRef = useRef(false);
   const committedRef = useRef(false);
 
   const config = agentConfig[tab.store.data.providerId];
@@ -42,13 +46,26 @@ export const ConversationTabItem = observer(function ConversationTabItem({
     pendingRenameRef.current = true;
   }, []);
 
-  const handleContextMenuOpenChangeComplete = useCallback((open: boolean) => {
-    if (!open && pendingRenameRef.current) {
-      pendingRenameRef.current = false;
-      committedRef.current = false;
-      setIsEditing(true);
-    }
+  const handleFork = useCallback(() => {
+    pendingForkRef.current = true;
   }, []);
+
+  // Defer the action until the context menu has fully closed, so it doesn't
+  // fight the menu's focus restoration (rename → inline input, fork → modal).
+  const handleContextMenuOpenChangeComplete = useCallback(
+    (open: boolean) => {
+      if (open) return;
+      if (pendingRenameRef.current) {
+        pendingRenameRef.current = false;
+        committedRef.current = false;
+        setIsEditing(true);
+      } else if (pendingForkRef.current) {
+        pendingForkRef.current = false;
+        onFork();
+      }
+    },
+    [onFork]
+  );
 
   const commitRename = (value: string) => {
     if (committedRef.current) return;
@@ -134,6 +151,12 @@ export const ConversationTabItem = observer(function ConversationTabItem({
           <Pencil className="size-4" />
           Rename
         </ContextMenuItem>
+        {isForkableProvider(tab.store.data.providerId) ? (
+          <ContextMenuItem onClick={handleFork}>
+            <GitFork className="size-4" />
+            Fork
+          </ContextMenuItem>
+        ) : null}
       </ContextMenuContent>
     </ContextMenu>
   );

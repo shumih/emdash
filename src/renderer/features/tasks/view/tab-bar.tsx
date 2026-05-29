@@ -1,11 +1,15 @@
+import { useHotkey } from '@tanstack/react-hotkeys';
 import { observer } from 'mobx-react-lite';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useTabGroupContext } from '@renderer/features/tasks/tabs/tab-group-context';
 import {
   useConversations,
+  useTaskViewContext,
   useWorkspaceViewModel,
 } from '@renderer/features/tasks/task-view-context';
 import { useTabShortcuts } from '@renderer/lib/hooks/useTabShortcuts';
+import { useShowModal } from '@renderer/lib/modal/modal-provider';
+import { isForkableProvider } from '@shared/conversations';
 import type { ConversationManagerStore } from '../conversations/conversation-manager';
 import type {
   ResolvedConversationTab,
@@ -21,7 +25,8 @@ import { TabBarActions } from './tab-bar/tab-bar-actions';
 
 function makeTabRenderers(
   tabManager: ReturnType<typeof useTabGroupContext>['tabManager'],
-  conversations: ConversationManagerStore
+  conversations: ConversationManagerStore,
+  forkAndOpen: (conversationId: string) => void
 ) {
   return {
     conversation: (tab: ResolvedConversationTab): ReactNode => (
@@ -32,6 +37,7 @@ function makeTabRenderers(
         onPin={() => tabManager.openConversation(tab.conversationId)}
         onClose={() => tabManager.closeTabWithGuard(tab.tabId)}
         onRenameSubmit={(name) => void conversations.renameConversation(tab.conversationId, name)}
+        onFork={() => forkAndOpen(tab.conversationId)}
       />
     ),
     diff: (tab: ResolvedDiffTab): ReactNode => (
@@ -60,12 +66,41 @@ export const TabBar = observer(function TabBar() {
   const { groupId, tabManager } = useTabGroupContext();
   const { tabGroupManager } = taskView;
   const conversations = useConversations();
-  const tabRenderers = makeTabRenderers(tabManager, conversations);
+  const { taskId } = useTaskViewContext();
+  const showForkModal = useShowModal('forkConversationModal');
+
+  const openForkModal = useCallback(
+    (conversationId: string) => {
+      const source = conversations.conversations.get(conversationId);
+      if (!source) return;
+      showForkModal({
+        taskId,
+        conversationId,
+        defaultTitle: source.data.title,
+        onSuccess: ({ conversationId: forkedId }) => tabManager.openConversation(forkedId),
+      });
+    },
+    [conversations, tabManager, taskId, showForkModal]
+  );
+
+  const tabRenderers = makeTabRenderers(tabManager, conversations, openForkModal);
 
   const isFocusedPane =
     taskView.focusedRegion === 'main' && tabGroupManager.activeGroupId === groupId;
 
   useTabShortcuts(tabManager, { focused: isFocusedPane });
+
+  useHotkey(
+    'Mod+Shift+D',
+    (e) => {
+      e.preventDefault();
+      const active = tabManager.resolvedTabs.find((t) => t.isActive);
+      if (active?.kind === 'conversation' && isForkableProvider(active.store.data.providerId)) {
+        openForkModal(active.conversationId);
+      }
+    },
+    { enabled: isFocusedPane, conflictBehavior: 'allow' }
+  );
 
   const resolvedTabs = tabManager.resolvedTabs;
 
