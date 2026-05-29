@@ -42,9 +42,10 @@ describe('rewriteClaudeSessionId', () => {
     expect((JSON.parse(second) as { sessionId: string }).sessionId).toBe('new');
   });
 
-  it('leaves lines without a sessionId untouched', () => {
-    const text = JSON.stringify({ type: 'summary', uuid: 'x' });
+  it('leaves lines without a sessionId byte-for-byte (no re-serialization)', () => {
+    // A line with formatting that JSON.stringify would alter (1.0 → 1, spaces).
+    const text = '{"type": "summary", "score": 1.0, "uuid": "x"}';
     const out = decode(rewriteClaudeSessionId(bundle(text), 'new'));
-    expect(JSON.parse(out)).toEqual({ type: 'summary', uuid: 'x' });
+    expect(out).toBe(text);
   });
 });

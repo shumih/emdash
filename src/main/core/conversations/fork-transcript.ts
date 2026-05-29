@@ -18,7 +18,10 @@ export function rewriteClaudeSessionId(bundle: RawBundle, newSessionId: string):
       if (!line.trim()) return line;
       try {
         const obj = JSON.parse(line) as Record<string, unknown>;
-        if (typeof obj.sessionId === 'string') obj.sessionId = newSessionId;
+        // Leave lines without a sessionId byte-for-byte: re-serializing would
+        // risk reformatting numbers/escapes on data we don't need to touch.
+        if (typeof obj.sessionId !== 'string') return line;
+        obj.sessionId = newSessionId;
         return JSON.stringify(obj);
       } catch {
         return line;

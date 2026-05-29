@@ -120,6 +120,13 @@ export const APP_SHORTCUTS = defineShortcuts({
     description: 'Create a new conversation in the current task',
     category: 'Task View',
   },
+  forkConversation: {
+    defaultHotkey: 'Mod+Shift+D',
+    label: 'Fork Conversation',
+    description: 'Fork the active conversation into a new tab',
+    category: 'Task View',
+    conflictBehavior: 'allow',
+  },
   newTerminal: {
     defaultHotkey: 'Mod+Shift+T',
     label: 'New Terminal',

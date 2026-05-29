@@ -1,12 +1,17 @@
 import { useHotkey } from '@tanstack/react-hotkeys';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { useAppSettingsKey } from '@renderer/features/settings/use-app-settings-key';
 import { useTabGroupContext } from '@renderer/features/tasks/tabs/tab-group-context';
 import {
   useConversations,
   useTaskViewContext,
   useWorkspaceViewModel,
 } from '@renderer/features/tasks/task-view-context';
+import {
+  getEffectiveHotkey,
+  getHotkeyRegistration,
+} from '@renderer/lib/hooks/useKeyboardShortcuts';
 import { useTabShortcuts } from '@renderer/lib/hooks/useTabShortcuts';
 import { useShowModal } from '@renderer/lib/modal/modal-provider';
 import { isForkableProvider } from '@shared/conversations';
@@ -68,6 +73,7 @@ export const TabBar = observer(function TabBar() {
   const conversations = useConversations();
   const { taskId } = useTaskViewContext();
   const showForkModal = useShowModal('forkConversationModal');
+  const { value: keyboard } = useAppSettingsKey('keyboard');
 
   const openForkModal = useCallback(
     (conversationId: string) => {
@@ -77,6 +83,7 @@ export const TabBar = observer(function TabBar() {
         taskId,
         conversationId,
         defaultTitle: source.data.title,
+        provider: source.data.providerId,
         onSuccess: ({ conversationId: forkedId }) => tabManager.openConversation(forkedId),
       });
     },
@@ -91,7 +98,7 @@ export const TabBar = observer(function TabBar() {
   useTabShortcuts(tabManager, { focused: isFocusedPane });
 
   useHotkey(
-    'Mod+Shift+D',
+    getHotkeyRegistration('forkConversation', keyboard),
     (e) => {
       e.preventDefault();
       const active = tabManager.resolvedTabs.find((t) => t.isActive);
@@ -99,7 +106,10 @@ export const TabBar = observer(function TabBar() {
         openForkModal(active.conversationId);
       }
     },
-    { enabled: isFocusedPane, conflictBehavior: 'allow' }
+    {
+      enabled: isFocusedPane && getEffectiveHotkey('forkConversation', keyboard) !== null,
+      conflictBehavior: 'allow',
+    }
   );
 
   const resolvedTabs = tabManager.resolvedTabs;

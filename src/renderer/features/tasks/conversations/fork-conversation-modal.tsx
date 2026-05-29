@@ -1,5 +1,5 @@
 import { observer } from 'mobx-react-lite';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { conversationRegistry } from '@renderer/features/tasks/stores/conversation-registry';
 import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { Button } from '@renderer/lib/ui/button';
@@ -17,6 +17,7 @@ type ForkConversationModalArgs = {
   taskId: string;
   conversationId: string;
   defaultTitle: string;
+  provider: string;
 };
 
 type Props = BaseModalProps<{ conversationId: string }> & ForkConversationModalArgs;
@@ -25,20 +26,25 @@ export const ForkConversationModal = observer(function ForkConversationModal({
   taskId,
   conversationId,
   defaultTitle,
+  provider,
   onSuccess,
   onClose,
 }: Props) {
   const [name, setName] = useState(defaultTitle);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Synchronous guard: isSubmitting is async React state, so two rapid Enter
+  // presses can both read it as false and fork twice. The ref closes that gap.
+  const submittingRef = useRef(false);
 
   const trimmed = name.trim();
   const isValid = trimmed.length > 0;
 
   const handleSubmit = useCallback(async () => {
-    if (!isValid || isSubmitting) return;
+    if (!isValid || submittingRef.current) return;
     const conversationMgr = conversationRegistry.get(taskId);
     if (!conversationMgr) return;
+    submittingRef.current = true;
     setIsSubmitting(true);
     setError(null);
     try {
@@ -46,9 +52,10 @@ export const ForkConversationModal = observer(function ForkConversationModal({
       onSuccess({ conversationId: forked.id });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to fork session');
+      submittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [isValid, isSubmitting, taskId, conversationId, trimmed, onSuccess]);
+  }, [isValid, taskId, conversationId, trimmed, onSuccess]);
 
   return (
     <>
@@ -73,6 +80,12 @@ export const ForkConversationModal = observer(function ForkConversationModal({
               autoFocus
             />
             {error && <p className="text-destructive mt-1 text-xs">{error}</p>}
+            {provider === 'codex' && (
+              <p className="mt-1 text-xs text-foreground-passive">
+                Codex resumes the most recent session, so after forking, continuing the original
+                conversation may resume this fork instead.
+              </p>
+            )}
           </Field>
         </FieldGroup>
       </DialogContentArea>
