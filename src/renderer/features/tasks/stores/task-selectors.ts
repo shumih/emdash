@@ -1,5 +1,9 @@
 import { isUnmountedProject } from '@renderer/features/projects/stores/project';
-import { getProjectManagerStore } from '@renderer/features/projects/stores/project-selectors';
+import {
+  asMounted,
+  getProjectManagerStore,
+  getProjectStore,
+} from '@renderer/features/projects/stores/project-selectors';
 import type { AgentStatus } from '@renderer/features/tasks/conversations/conversation-manager';
 import type { DiffViewStore } from '@renderer/features/tasks/diff-view/stores/diff-view-store';
 import type { FileModelLifecycleStore } from '@renderer/features/tasks/editor/stores/file-model-lifecycle-store';
@@ -135,6 +139,30 @@ export function asProvisioned(
 export function getWorkspaceForTask(projectId: string, taskId: string) {
   const wsId = getTaskStore(projectId, taskId)?.workspaceId;
   return wsId ? (workspaceRegistry.get(projectId, wsId) ?? undefined) : undefined;
+}
+
+/**
+ * Whether a task operates directly in the project's main working copy (no
+ * isolated git worktree). Authoritative when the resolved workspace path is
+ * known — an in-place task's workspace path is the repo root, while a worktree
+ * task lives under the worktree pool. Falls back to the `taskBranch` heuristic
+ * for tasks that have not provisioned a workspace yet; returns undefined when it
+ * cannot be determined (e.g. an unregistered placeholder).
+ *
+ * Note: `taskBranch` alone is not sufficient — a `checkout-existing` task on a
+ * branch already checked out at the repo root resolves in-place despite having
+ * a taskBranch, so the path comparison is the source of truth.
+ */
+export function taskRunsInPlace(projectId: string, taskId: string): boolean | undefined {
+  const repoRoot = asMounted(getProjectStore(projectId))?.data.path;
+  const workspacePath = getWorkspaceForTask(projectId, taskId)?.path;
+  if (repoRoot && workspacePath) {
+    const strip = (p: string) => p.replace(/\/+$/, '');
+    return strip(workspacePath) === strip(repoRoot);
+  }
+  const task = getTaskStore(projectId, taskId);
+  if (!task || isUnregistered(task)) return undefined;
+  return 'taskBranch' in task.data ? !task.data.taskBranch : undefined;
 }
 
 export function getWorkspaceViewModel(

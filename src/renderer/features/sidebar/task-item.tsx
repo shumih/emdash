@@ -1,3 +1,4 @@
+import { CircleSlash } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { TaskSidebarAgentStatus } from '@renderer/features/sidebar/task-sidebar-agent-status';
 import { TaskContextMenu } from '@renderer/features/tasks/components/task-context-menu';
@@ -7,6 +8,7 @@ import {
   getTaskManagerStore,
   getTaskStore,
   getWorkspaceForTask,
+  taskRunsInPlace,
 } from '@renderer/features/tasks/stores/task-selectors';
 import { type TaskStore } from '@renderer/features/tasks/stores/task-store';
 import {
@@ -79,6 +81,7 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
   const git = getTaskGitStore(projectId, taskId);
   const branchName =
     git?.branchName ?? ('taskBranch' in task.data ? task.data.taskBranch : undefined);
+  const isInPlace = taskRunsInPlace(projectId, taskId) === true;
   const handleReconnect =
     workspaceStore?.connectionState != null ? () => workspaceStore.reconnect() : undefined;
 
@@ -116,6 +119,14 @@ export const SidebarTaskItem = observer(function SidebarTaskItem({
           >
             {taskName}
           </span>
+          {isInPlace && (
+            <span
+              title="No worktree — runs in the main repo"
+              className="flex shrink-0 items-center text-foreground-passive"
+            >
+              <CircleSlash className="size-3" />
+            </span>
+          )}
           <TaskGitDiffStats task={task} className="flex h-full shrink-0 items-center pr-1 pl-1" />
           <RenderPrBadge task={task} />
         </div>

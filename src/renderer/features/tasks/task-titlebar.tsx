@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  CircleSlash,
   Clock,
   FileDiff,
   FolderOpen,
@@ -20,6 +21,7 @@ import {
   getRegisteredTaskData,
   getTaskStore,
   taskDisplayName,
+  taskRunsInPlace,
   taskViewKind,
 } from '@renderer/features/tasks/stores/task-selectors';
 import {
@@ -307,6 +309,12 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
           </button>
         </div>
       }
+      centerSlot={
+        <WorktreeIndicator
+          inPlace={taskRunsInPlace(projectId, taskId) ?? false}
+          branchName={workspace.git.branchName}
+        />
+      }
       rightSlot={
         <div className="flex items-center gap-2">
           <TaskResourceBadge projectId={projectId} taskId={taskId} />
@@ -409,6 +417,35 @@ const ActiveTaskTitlebar = observer(function ActiveTaskTitlebar({
     />
   );
 });
+
+function WorktreeIndicator({
+  inPlace,
+  branchName,
+}: {
+  inPlace: boolean;
+  branchName: string | null | undefined;
+}) {
+  if (!inPlace) {
+    return (
+      <span
+        title={branchName ? `Worktree branch: ${branchName}` : 'Worktree'}
+        className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-passive [-webkit-app-region:no-drag]"
+      >
+        <GitBranch className="size-3.5 shrink-0" />
+        <span className="truncate">{branchName}</span>
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`No worktree — running in the main repo${branchName ? ` on ${branchName}` : ''}`}
+      className="flex min-w-0 items-center gap-1.5 text-xs text-foreground-passive [-webkit-app-region:no-drag]"
+    >
+      <CircleSlash className="size-3.5 shrink-0" />
+      <span className="truncate">in-place{branchName ? ` · ${branchName}` : ''}</span>
+    </span>
+  );
+}
 
 function LinkedIssueBadge({ issue }: { issue: Issue }) {
   return (

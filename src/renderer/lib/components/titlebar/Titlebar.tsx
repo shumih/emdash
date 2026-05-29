@@ -7,7 +7,15 @@ import { BoundShortcut } from '@renderer/lib/ui/shortcut';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/lib/ui/tooltip';
 import { cn } from '@renderer/utils/utils';
 
-export function Titlebar({ leftSlot, rightSlot }: { leftSlot?: ReactNode; rightSlot?: ReactNode }) {
+export function Titlebar({
+  leftSlot,
+  centerSlot,
+  rightSlot,
+}: {
+  leftSlot?: ReactNode;
+  centerSlot?: ReactNode;
+  rightSlot?: ReactNode;
+}) {
   const { setCollapsed, isLeftOpen } = useWorkspaceLayoutContext();
   return (
     <header
@@ -43,6 +51,9 @@ export function Titlebar({ leftSlot, rightSlot }: { leftSlot?: ReactNode; rightS
             )}
             {leftSlot}
           </div>
+          {centerSlot ? (
+            <div className="flex min-w-0 flex-1 items-center justify-center px-2">{centerSlot}</div>
+          ) : null}
           <div className="flex items-center justify-end [-webkit-app-region:no-drag]">
             {rightSlot}
           </div>
