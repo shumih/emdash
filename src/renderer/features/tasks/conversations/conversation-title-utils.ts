@@ -9,10 +9,13 @@ function capitalizeProviderId(providerId: AgentProviderId): string {
   return `${providerId.charAt(0).toUpperCase()}${providerId.slice(1)}`;
 }
 
-function parseDefaultTitleIndex(title: string, providerId: AgentProviderId): number | null {
-  const match = title.match(new RegExp(`^${providerId} \\(([1-9]\\d*)\\)$`, 'i'));
-  if (!match) return null;
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
+function parseSuffixIndex(title: string, prefix: string): number | null {
+  const match = title.match(new RegExp(`^${escapeRegex(prefix)}-([1-9]\\d*)$`));
+  if (!match) return null;
   const rawIndex = match[1];
   const index = Number(rawIndex);
   if (!Number.isInteger(index) || index < 1) return null;
@@ -20,29 +23,52 @@ function parseDefaultTitleIndex(title: string, providerId: AgentProviderId): num
   return index;
 }
 
+function parseLegacyProviderTitleIndex(title: string, providerId: AgentProviderId): number | null {
+  const match = title.match(new RegExp(`^${providerId} \\(([1-9]\\d*)\\)$`, 'i'));
+  if (!match) return null;
+  const rawIndex = match[1];
+  const index = Number(rawIndex);
+  if (!Number.isInteger(index) || index < 1) return null;
+  if (String(index) !== rawIndex) return null;
+  return index;
+}
+
+/**
+ * Format a stored title for display. Legacy `claude (1)` is title-cased to
+ * `Claude (1)`; new `${prefix}-${index}` titles render as-is.
+ */
 export function formatConversationTitleForDisplay(
   providerId: AgentProviderId,
   title: string
 ): string {
-  const index = parseDefaultTitleIndex(title, providerId);
-  if (index === null) return title;
-  return `${capitalizeProviderId(providerId)} (${index})`;
+  const legacyIndex = parseLegacyProviderTitleIndex(title, providerId);
+  if (legacyIndex !== null) return `${capitalizeProviderId(providerId)} (${legacyIndex})`;
+  return title;
 }
 
-export function nextDefaultConversationTitle(
-  providerId: AgentProviderId,
+/**
+ * Compute the next `${prefix}-${index}` title that does not collide with any
+ * existing conversation title. Indexes count up from 1, filling gaps.
+ *
+ * The full title is what gets passed to the agent as its session name, so the
+ * prefix should be human-meaningful (task name by default, or whatever the user
+ * typed in the modal).
+ */
+export function nextIndexedConversationTitle(
+  prefix: string,
   conversations: ConversationTitleInput[]
 ): string {
+  const trimmed = prefix.trim();
+  const safePrefix = trimmed.length > 0 ? trimmed : 'session';
   const used = new Set<number>();
 
   for (const conversation of conversations) {
-    if (conversation.providerId !== providerId) continue;
-    const index = parseDefaultTitleIndex(conversation.title, providerId);
+    const index = parseSuffixIndex(conversation.title, safePrefix);
     if (index !== null) used.add(index);
   }
 
   let next = 1;
   while (used.has(next)) next += 1;
 
-  return `${capitalizeProviderId(providerId)} (${next})`;
+  return `${safePrefix}-${next}`;
 }

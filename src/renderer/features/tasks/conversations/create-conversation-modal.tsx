@@ -1,8 +1,9 @@
 import { observer } from 'mobx-react-lite';
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { getProjectSshConnectionId } from '@renderer/features/projects/stores/project-selectors';
 import { useAgentAutoApproveDefaults } from '@renderer/features/tasks/hooks/useAgentAutoApproveDefaults';
 import { conversationRegistry } from '@renderer/features/tasks/stores/conversation-registry';
+import { getTaskStore, taskDisplayName } from '@renderer/features/tasks/stores/task-selectors';
 import { AgentSelector } from '@renderer/lib/components/agent-selector/agent-selector';
 import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { ConfirmButton } from '@renderer/lib/ui/confirm-button';
@@ -13,8 +14,9 @@ import {
   DialogTitle,
 } from '@renderer/lib/ui/dialog';
 import { Field, FieldGroup, FieldLabel } from '@renderer/lib/ui/field';
+import { Input } from '@renderer/lib/ui/input';
 import { Switch } from '@renderer/lib/ui/switch';
-import { nextDefaultConversationTitle } from './conversation-title-utils';
+import { nextIndexedConversationTitle } from './conversation-title-utils';
 import { useEffectiveProvider } from './use-effective-provider';
 
 export const CreateConversationModal = observer(function CreateConversationModal({
@@ -29,14 +31,21 @@ export const CreateConversationModal = observer(function CreateConversationModal
   const { providerId, setProviderOverride, createDisabled } = useEffectiveProvider(connectionId);
   const conversationMgr = conversationRegistry.get(taskId);
   const autoApproveDefaults = useAgentAutoApproveDefaults();
+  const taskName = taskDisplayName(getTaskStore(projectId, taskId)) ?? '';
+  const [nameInput, setNameInput] = useState(taskName);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const skipPermissions = providerId ? autoApproveDefaults.getDefault(providerId) : false;
-  const titleProviderId = providerId ?? 'claude';
-  const title = nextDefaultConversationTitle(
-    titleProviderId,
-    Array.from(conversationMgr?.conversations.values() ?? [], (conversation) => conversation.data)
+  const effectivePrefix = nameInput.trim() || taskName;
+  const existingTitles = useMemo(
+    () =>
+      Array.from(conversationMgr?.conversations.values() ?? [], (conversation) => ({
+        providerId: conversation.data.providerId,
+        title: conversation.data.title,
+      })),
+    [conversationMgr]
   );
+  const title = nextIndexedConversationTitle(effectivePrefix, existingTitles);
 
   const handleCreateConversation = useCallback(async () => {
     if (createDisabled || isSubmitting || !conversationMgr || !providerId) return;
@@ -77,9 +86,19 @@ export const CreateConversationModal = observer(function CreateConversationModal
       <DialogContentArea>
         <FieldGroup>
           <Field>
+            <FieldLabel>Name</FieldLabel>
+            <Input
+              autoFocus
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              placeholder={taskName}
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <p className="text-xs text-foreground-passive">Session name: {title}</p>
+          </Field>
+          <Field>
             <FieldLabel>Agent</FieldLabel>
             <AgentSelector
-              autoFocus
               value={providerId}
               onChange={setProviderOverride}
               connectionId={connectionId}

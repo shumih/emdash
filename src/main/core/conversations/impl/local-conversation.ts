@@ -119,7 +119,9 @@ export class LocalConversationProvider implements ConversationProvider {
         isResuming && conversation.providerSessionId
           ? conversation.providerSessionId
           : conversation.id,
-      sessionName: this.taskName,
+      // Pass the conversation title (e.g. `${task-or-custom-name}-${index}`)
+      // so each tab gets a distinct, searchable name in the agent's UI.
+      sessionName: conversation.title?.trim() || this.taskName,
       isResuming,
       initialPrompt,
     });

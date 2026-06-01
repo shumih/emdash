@@ -7,6 +7,7 @@ import type { FileSystemProvider } from '@main/core/fs/types';
 import { getProjectById } from '@main/core/projects/operations/getProjects';
 import { sshConnectionManager } from '@main/core/ssh/lifecycle/production-ssh-connection-manager';
 import { resolveRemoteHome } from '@main/core/ssh/lifecycle/remote-shell-profile';
+import { workspaceRegistry } from '@main/core/workspaces/workspace-registry';
 import { db } from '@main/db/client';
 import { conversations, tasks, workspaces, type ConversationRow } from '@main/db/schema';
 
@@ -49,9 +50,15 @@ export async function getTaskCwd(projectId: string, taskId: string): Promise<str
     .from(workspaces)
     .where(eq(workspaces.id, taskRow.workspaceId))
     .limit(1);
-  if (!wsRow?.path) throw new Error(`Workspace has no path for task: ${taskId}`);
+  if (wsRow?.path) return wsRow.path;
 
-  return wsRow.path;
+  // Older tasks may have a workspace row whose `path` was never persisted
+  // (predates workspaceBootstrapService.persistPath being wired up). When the
+  // task is currently active, the in-memory registry has the real cwd.
+  const live = workspaceRegistry.get(taskRow.workspaceId);
+  if (live?.path) return live.path;
+
+  throw new Error(`Workspace has no path for task: ${taskId}`);
 }
 
 export async function getConversationRow(conversationId: string): Promise<ConversationRow> {
