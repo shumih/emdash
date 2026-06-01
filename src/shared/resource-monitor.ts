@@ -1,9 +1,14 @@
 import type { AgentProviderId } from '@shared/agent-provider-registry';
 
 /**
- * Per-PTY resource sample. `cpu` is a percentage of one core (can exceed 100
- * on multi-core systems). `memory` is RSS in bytes. `pid` is undefined for
- * remote (SSH) PTYs where the owning process runs on the remote host.
+ * Per-PTY resource sample. `cpu` and `memory` cover the PTY process's WHOLE
+ * subprocess subtree — the agent (`claude`/codex/…) plus every MCP server it
+ * spawns (node, chrome-devtools-mcp, …) and their descendants — not just the
+ * root pid, so the row reflects the agent's true footprint. `cpu` is a
+ * percentage of one core (can exceed 100 on multi-core systems); `memory` is
+ * summed RSS in bytes. `pid`/`ppid` identify the subtree root, and `pid` is
+ * undefined for remote (SSH) PTYs where the owning process runs on the remote
+ * host.
  *
  * `providerId` and `title` are populated for agent-conversation PTYs and
  * absent for plain shell terminals. They are sourced from the registry at

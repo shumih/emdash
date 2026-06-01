@@ -13,52 +13,66 @@ import type {
   ResourcePtyEntry,
   ResourceSnapshot,
 } from '@shared/resource-monitor';
+import { buildChildrenIndex, subtreePids } from './process-tree';
 
 const SAMPLE_INTERVAL_MS = 1500;
 const CPU_COUNT = os.cpus().length;
 const TOTAL_MEMORY_BYTES = os.totalmem();
 const STALE_LOCAL_PTY_MEMORY_BYTES = 2 * 1024 * 1024;
 
+type PidSample = { cpu: number; memory: number; ppid?: number };
+
 export async function sampleOnce(): Promise<ResourceSnapshot> {
   const active = ptySessionRegistry.listActiveSessions();
-  const localPids = active
+  const rootPids = active
     .map((a) => a.pid)
     .filter((p): p is number => typeof p === 'number' && p > 0);
 
-  let usage: Record<string, { cpu: number; memory: number; ppid?: number }> = {};
-  if (localPids.length > 0) {
-    try {
-      usage = await pidusage(localPids);
-    } catch {
-      // A dead PID rejects the whole batch — fall back to per-pid sampling in parallel.
-      const results = await Promise.allSettled(localPids.map((pid) => pidusage(pid)));
-      results.forEach((r, i) => {
-        if (r.status === 'fulfilled') {
-          usage[String(localPids[i])] = {
-            cpu: r.value.cpu,
-            memory: r.value.memory,
-            ppid: r.value.ppid,
-          };
-        }
-      });
-    }
+  // An agent's real footprint is its whole subprocess subtree: the `claude`
+  // (or codex/…) PTY process plus every MCP server it spawns (node,
+  // chrome-devtools-mcp, …) and their grandchildren. Sampling only the root pid
+  // under-reports by the (often dominant) weight of those helpers. Build a
+  // pid → children index once per tick and fold each root's subtree into a
+  // single row. `null` on platforms without `ps` (Windows) → per-root sampling.
+  const childrenByPid = await buildChildrenIndex();
+
+  const subtreeByRoot = new Map<number, number[]>();
+  const allPids = new Set<number>();
+  for (const root of rootPids) {
+    const subtree = childrenByPid ? subtreePids(root, childrenByPid) : [root];
+    subtreeByRoot.set(root, subtree);
+    for (const pid of subtree) allPids.add(pid);
   }
+
+  const usage = await sampleUsage([...allPids]);
 
   const entries: ResourcePtyEntry[] = [];
   for (const a of active) {
     const parsed = parsePtySessionId(a.sessionId);
     if (!parsed) continue;
-    const u = typeof a.pid === 'number' ? usage[String(a.pid)] : undefined;
-    if (isStaleLocalPty(a.pid, u)) continue;
+    const rootPid = typeof a.pid === 'number' ? a.pid : undefined;
+    const subtree = rootPid !== undefined ? (subtreeByRoot.get(rootPid) ?? [rootPid]) : [];
+
+    let cpu = 0;
+    let memory = 0;
+    for (const pid of subtree) {
+      const u = usage[String(pid)];
+      if (!u) continue;
+      cpu += u.cpu;
+      memory += u.memory;
+    }
+    const rootUsage = rootPid !== undefined ? usage[String(rootPid)] : undefined;
+    if (isStaleLocalPty(rootPid, cpu, memory)) continue;
+
     entries.push({
       sessionId: a.sessionId,
       projectId: parsed.projectId,
       scopeId: parsed.scopeId,
       leafId: parsed.leafId,
       pid: a.pid,
-      ppid: u?.ppid,
-      cpu: u?.cpu ?? 0,
-      memory: u?.memory ?? 0,
+      ppid: rootUsage?.ppid,
+      cpu,
+      memory,
       providerId: a.metadata?.providerId,
       title: a.metadata?.title,
     });
@@ -75,18 +89,43 @@ export async function sampleOnce(): Promise<ResourceSnapshot> {
   };
 }
 
-function isStaleLocalPty(
-  pid: number | undefined,
-  usage: { cpu: number; memory: number; ppid?: number } | undefined
-): boolean {
-  if (pid === undefined || !usage) return false;
-  return usage.cpu === 0 && usage.memory < STALE_LOCAL_PTY_MEMORY_BYTES;
+/** Sample cpu + RSS for a set of pids, tolerating dead pids in the batch. */
+async function sampleUsage(pids: number[]): Promise<Record<string, PidSample>> {
+  if (pids.length === 0) return {};
+  try {
+    return await pidusage(pids);
+  } catch {
+    // A dead PID rejects the whole batch — fall back to per-pid sampling.
+    const usage: Record<string, PidSample> = {};
+    const results = await Promise.allSettled(pids.map((pid) => pidusage(pid)));
+    results.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        usage[String(pids[i])] = {
+          cpu: r.value.cpu,
+          memory: r.value.memory,
+          ppid: r.value.ppid,
+        };
+      }
+    });
+    return usage;
+  }
+}
+
+/**
+ * True when an agent's PTY (and its subtree) has no meaningful footprint — the
+ * process has exited but the registry hasn't cleaned it up yet. A live agent
+ * always exceeds the threshold (a fresh Node process alone is tens of MB).
+ */
+function isStaleLocalPty(pid: number | undefined, cpu: number, memory: number): boolean {
+  if (pid === undefined) return false;
+  return cpu === 0 && memory < STALE_LOCAL_PTY_MEMORY_BYTES;
 }
 
 /**
  * Sum memory + CPU across all Electron processes (main, renderer, GPU, utility)
  * and capture each row individually. `workingSetSize` is reported in KiB;
- * `percentCPUUsage` is % of one core.
+ * `percentCPUUsage` is % of one core. These are Electron's own processes only;
+ * the pty-spawned agent subtrees are reported per-entry, so there is no overlap.
  */
 function sampleAppUsage(): { usage: ResourceAppUsage; processes: ResourceAppProcess[] } {
   try {
