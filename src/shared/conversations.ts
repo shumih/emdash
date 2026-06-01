@@ -66,3 +66,19 @@ export type CreateConversationParams = {
   sourceShareId?: string;
   sourceTargetProvider?: string;
 };
+
+export function buildProviderSessionName({
+  taskName,
+  conversationTitle,
+}: {
+  taskName: string;
+  conversationTitle?: string | null;
+}): string {
+  const task = taskName.trim();
+  const title = conversationTitle?.trim() ?? '';
+
+  if (!task) return title;
+  if (!title) return task;
+
+  return `${task} - ${title}`;
+}

@@ -69,10 +69,11 @@ export type AgentProviderDefinition = {
    */
   sessionIdFlag?: string;
   /**
-   * CLI flag to give the session a human-readable display name, set to the
-   * Emdash task name at spawn. Surfaces in the agent's own UI (e.g. Claude
-   * Code's prompt box, /resume picker, and terminal title) so a recreated or
-   * resumed session is recognizable. e.g. '--name' for Claude Code.
+   * CLI flag to give the session a human-readable display name, composed from
+   * the Emdash task name and conversation title at spawn. Surfaces in the
+   * agent's own UI (e.g. Claude Code's prompt box, /resume picker, and terminal
+   * title) so a recreated or resumed session is recognizable. e.g. '--name' for
+   * Claude Code.
    */
   sessionNameFlag?: string;
   newConversationFlag?: string;

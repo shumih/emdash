@@ -7,7 +7,7 @@ import {
   mountedProjectData,
 } from '@renderer/features/projects/stores/project-selectors';
 import { buildLinkedIssueContextAction } from '@renderer/features/tasks/conversations/context-actions';
-import { nextIndexedConversationTitle } from '@renderer/features/tasks/conversations/conversation-title-utils';
+import { nextProviderConversationTitle } from '@renderer/features/tasks/conversations/conversation-title-utils';
 import { resolveContextActionText } from '@renderer/features/tasks/conversations/resolve-context-action-text';
 import { ProjectSelector } from '@renderer/features/tasks/create-task-modal/project-selector';
 import { useAgentAutoApproveDefaults } from '@renderer/features/tasks/hooks/useAgentAutoApproveDefaults';
@@ -148,7 +148,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
             projectId: selectedProjectId,
             taskId: id,
             provider: initialConversation.provider,
-            title: nextIndexedConversationTitle(activeMode.taskName, []),
+            title: nextProviderConversationTitle(initialConversation.provider, []),
             initialPrompt: initialPrompt.trim() || undefined,
             autoApprove: autoApproveDefaults.getDefault(initialConversation.provider),
           }
@@ -237,7 +237,6 @@ export const CreateTaskModal = observer(function CreateTaskModal({
     initialConversation,
     autoApproveDefaults,
     taskSettings.includeIssueContextByDefault,
-    activeMode.taskName,
     navigate,
     onClose,
   ]);

@@ -18,7 +18,7 @@ import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
 import { getProvider } from '@shared/agent-provider-registry';
-import type { Conversation } from '@shared/conversations';
+import { buildProviderSessionName, type Conversation } from '@shared/conversations';
 import { agentSessionExitedChannel } from '@shared/events/agentEvents';
 import { makePtyId } from '@shared/ptyId';
 import { makePtySessionId } from '@shared/ptySessionId';
@@ -119,9 +119,12 @@ export class LocalConversationProvider implements ConversationProvider {
         isResuming && conversation.providerSessionId
           ? conversation.providerSessionId
           : conversation.id,
-      // Pass the conversation title (e.g. `${task-or-custom-name}-${index}`)
-      // so each tab gets a distinct, searchable name in the agent's UI.
-      sessionName: conversation.title?.trim() || this.taskName,
+      // Keep the app title as the tab label, but include the task name in the
+      // provider's native session name so external resume/search UIs have both.
+      sessionName: buildProviderSessionName({
+        taskName: this.taskName,
+        conversationTitle: conversation.title,
+      }),
       isResuming,
       initialPrompt,
     });

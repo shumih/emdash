@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   formatConversationTitleForDisplay,
   nextIndexedConversationTitle,
+  nextProviderConversationTitle,
 } from '@renderer/features/tasks/conversations/conversation-title-utils';
+import { buildProviderSessionName } from '@shared/conversations';
 
 describe('nextIndexedConversationTitle', () => {
   it('fills the smallest missing index for the given prefix', () => {
@@ -61,5 +63,37 @@ describe('formatConversationTitleForDisplay', () => {
 
   it('leaves arbitrary custom titles unchanged', () => {
     expect(formatConversationTitleForDisplay('codex', 'release-triage')).toBe('release-triage');
+  });
+});
+
+describe('nextProviderConversationTitle', () => {
+  it('uses the provider name for the first conversation', () => {
+    expect(nextProviderConversationTitle('claude', [])).toBe('Claude Code');
+  });
+
+  it('indexes provider names only after collisions', () => {
+    const title = nextProviderConversationTitle('claude', [
+      { providerId: 'claude', title: 'Claude Code' },
+      { providerId: 'claude', title: 'Claude Code-3' },
+    ]);
+
+    expect(title).toBe('Claude Code-2');
+  });
+});
+
+describe('buildProviderSessionName', () => {
+  it('combines the task name and conversation title', () => {
+    expect(
+      buildProviderSessionName({ taskName: 'fix-login', conversationTitle: 'Claude Code' })
+    ).toBe('fix-login - Claude Code');
+  });
+
+  it('falls back to whichever side is present', () => {
+    expect(buildProviderSessionName({ taskName: 'fix-login', conversationTitle: '' })).toBe(
+      'fix-login'
+    );
+    expect(buildProviderSessionName({ taskName: '  ', conversationTitle: 'Claude Code' })).toBe(
+      'Claude Code'
+    );
   });
 });

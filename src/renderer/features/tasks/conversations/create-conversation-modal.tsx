@@ -16,7 +16,7 @@ import {
 import { Field, FieldGroup, FieldLabel } from '@renderer/lib/ui/field';
 import { Input } from '@renderer/lib/ui/input';
 import { Switch } from '@renderer/lib/ui/switch';
-import { nextIndexedConversationTitle } from './conversation-title-utils';
+import { nextProviderConversationTitle } from './conversation-title-utils';
 import { useEffectiveProvider } from './use-effective-provider';
 
 export const CreateConversationModal = observer(function CreateConversationModal({
@@ -45,10 +45,15 @@ export const CreateConversationModal = observer(function CreateConversationModal
       })),
     [conversationMgr]
   );
-  const placeholderTitle = nextIndexedConversationTitle(taskName, existingTitles);
+  const placeholderTitle = providerId
+    ? nextProviderConversationTitle(providerId, existingTitles)
+    : taskName || 'Session';
+  const conversationTitle = title || placeholderTitle;
 
   const handleCreateConversation = useCallback(async () => {
-    if (createDisabled || isSubmitting || !conversationMgr || !providerId || !title) return;
+    if (createDisabled || isSubmitting || !conversationMgr || !providerId || !conversationTitle) {
+      return;
+    }
     const id = crypto.randomUUID();
     setIsSubmitting(true);
     setError(null);
@@ -59,7 +64,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
         id,
         autoApprove: skipPermissions,
         provider: providerId,
-        title,
+        title: conversationTitle,
       });
       onSuccess({ conversationId: id });
     } catch {
@@ -71,7 +76,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
     createDisabled,
     isSubmitting,
     providerId,
-    title,
+    conversationTitle,
     onSuccess,
     projectId,
     taskId,
@@ -94,7 +99,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
               placeholder={placeholderTitle}
               onFocus={(e) => e.currentTarget.select()}
             />
-            {title && <p className="text-xs text-foreground-passive">Session name: {title}</p>}
+            <p className="text-xs text-foreground-passive">Session name: {conversationTitle}</p>
           </Field>
           <Field>
             <FieldLabel>Agent</FieldLabel>
@@ -122,7 +127,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
       <DialogFooter>
         <ConfirmButton
           onClick={() => void handleCreateConversation()}
-          disabled={createDisabled || isSubmitting || !title}
+          disabled={createDisabled || isSubmitting || !conversationTitle}
         >
           {isSubmitting ? 'Creating...' : 'Create'}
         </ConfirmButton>

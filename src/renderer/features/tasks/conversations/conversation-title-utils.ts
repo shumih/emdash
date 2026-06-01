@@ -1,4 +1,4 @@
-import { type AgentProviderId } from '@shared/agent-provider-registry';
+import { getProvider, type AgentProviderId } from '@shared/agent-provider-registry';
 
 type ConversationTitleInput = {
   providerId: AgentProviderId;
@@ -21,6 +21,11 @@ function parseSuffixIndex(title: string, prefix: string): number | null {
   if (!Number.isInteger(index) || index < 1) return null;
   if (String(index) !== rawIndex) return null;
   return index;
+}
+
+function parseIndexedOrBaseTitle(title: string, prefix: string): number | null {
+  if (title === prefix) return 1;
+  return parseSuffixIndex(title, prefix);
 }
 
 function parseLegacyProviderTitleIndex(title: string, providerId: AgentProviderId): number | null {
@@ -70,4 +75,26 @@ export function nextIndexedConversationTitle(
   while (used.has(next)) next += 1;
 
   return `${safePrefix}-${next}`;
+}
+
+/**
+ * Compute the next display title for a provider-backed conversation. The first
+ * title is the provider name itself; later collisions use `${providerName}-${n}`.
+ */
+export function nextProviderConversationTitle(
+  providerId: AgentProviderId,
+  conversations: ConversationTitleInput[]
+): string {
+  const providerName = getProvider(providerId)?.name ?? capitalizeProviderId(providerId);
+  const used = new Set<number>();
+
+  for (const conversation of conversations) {
+    const index = parseIndexedOrBaseTitle(conversation.title, providerName);
+    if (index !== null) used.add(index);
+  }
+
+  let next = 1;
+  while (used.has(next)) next += 1;
+
+  return next === 1 ? providerName : `${providerName}-${next}`;
 }

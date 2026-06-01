@@ -15,7 +15,7 @@ import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
 import type { AgentSessionConfig } from '@shared/agent-session';
-import type { Conversation } from '@shared/conversations';
+import { buildProviderSessionName, type Conversation } from '@shared/conversations';
 import { agentSessionExitedChannel } from '@shared/events/agentEvents';
 import { makePtySessionId } from '@shared/ptySessionId';
 import { listClaudeSessionIds, reconcileClaudeSessionId } from '../claude-transcript-locator';
@@ -107,7 +107,10 @@ export class SshConversationProvider implements ConversationProvider {
         isResuming && conversation.providerSessionId
           ? conversation.providerSessionId
           : conversation.id,
-      sessionName: this.taskName,
+      sessionName: buildProviderSessionName({
+        taskName: this.taskName,
+        conversationTitle: conversation.title,
+      }),
       isResuming,
       initialPrompt,
     });
