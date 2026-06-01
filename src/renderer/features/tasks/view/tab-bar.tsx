@@ -31,7 +31,8 @@ import { TabBarActions } from './tab-bar/tab-bar-actions';
 function makeTabRenderers(
   tabManager: ReturnType<typeof useTabGroupContext>['tabManager'],
   conversations: ConversationManagerStore,
-  forkAndOpen: (conversationId: string) => void
+  forkAndOpen: (conversationId: string) => void,
+  share: (conversationId: string) => void
 ) {
   return {
     conversation: (tab: ResolvedConversationTab): ReactNode => (
@@ -43,6 +44,7 @@ function makeTabRenderers(
         onClose={() => tabManager.closeTabWithGuard(tab.tabId)}
         onRenameSubmit={(name) => void conversations.renameConversation(tab.conversationId, name)}
         onFork={() => forkAndOpen(tab.conversationId)}
+        onShare={() => share(tab.conversationId)}
       />
     ),
     diff: (tab: ResolvedDiffTab): ReactNode => (
@@ -73,6 +75,7 @@ export const TabBar = observer(function TabBar() {
   const conversations = useConversations();
   const { taskId } = useTaskViewContext();
   const showForkModal = useShowModal('forkConversationModal');
+  const showShareModal = useShowModal('shareSessionModal');
   const { value: keyboard } = useAppSettingsKey('keyboard');
 
   const openForkModal = useCallback(
@@ -90,7 +93,21 @@ export const TabBar = observer(function TabBar() {
     [conversations, tabManager, taskId, showForkModal]
   );
 
-  const tabRenderers = makeTabRenderers(tabManager, conversations, openForkModal);
+  const openShareModal = useCallback(
+    (conversationId: string) => {
+      const source = conversations.conversations.get(conversationId);
+      if (!source) return;
+      showShareModal({
+        projectId: source.data.projectId,
+        taskId,
+        conversationId,
+        title: source.data.title,
+      });
+    },
+    [conversations, taskId, showShareModal]
+  );
+
+  const tabRenderers = makeTabRenderers(tabManager, conversations, openForkModal, openShareModal);
 
   const isFocusedPane =
     taskView.focusedRegion === 'main' && tabGroupManager.activeGroupId === groupId;

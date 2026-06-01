@@ -1,4 +1,4 @@
-import { GitFork, Pencil } from 'lucide-react';
+import { GitFork, Pencil, Share2 } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useRef, useState } from 'react';
 import AgentLogo from '@renderer/lib/components/agent-logo';
@@ -11,6 +11,7 @@ import {
 import { Separator } from '@renderer/lib/ui/separator';
 import { agentConfig } from '@renderer/utils/agentConfig';
 import { isForkableProvider } from '@shared/conversations';
+import { isShareProvider } from '@shared/shared-sessions';
 import { AgentStatusIndicator } from '../../components/agent-status-indicator';
 import { formatConversationTitleForDisplay } from '../../conversations/conversation-title-utils';
 import type { ResolvedConversationTab } from '../../tabs/tab-manager-store';
@@ -25,6 +26,7 @@ export const ConversationTabItem = observer(function ConversationTabItem({
   onClose,
   onRenameSubmit,
   onFork,
+  onShare,
 }: {
   tab: ResolvedConversationTab;
   onSelect: () => void;
@@ -32,10 +34,12 @@ export const ConversationTabItem = observer(function ConversationTabItem({
   onClose: () => void;
   onRenameSubmit: (newName: string) => void;
   onFork: () => void;
+  onShare: () => void;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const pendingRenameRef = useRef(false);
   const pendingForkRef = useRef(false);
+  const pendingShareRef = useRef(false);
   const committedRef = useRef(false);
 
   const config = agentConfig[tab.store.data.providerId];
@@ -50,8 +54,12 @@ export const ConversationTabItem = observer(function ConversationTabItem({
     pendingForkRef.current = true;
   }, []);
 
+  const handleShare = useCallback(() => {
+    pendingShareRef.current = true;
+  }, []);
+
   // Defer the action until the context menu has fully closed, so it doesn't
-  // fight the menu's focus restoration (rename → inline input, fork → modal).
+  // fight the menu's focus restoration (rename → inline input, fork/share → modal).
   const handleContextMenuOpenChangeComplete = useCallback(
     (open: boolean) => {
       if (open) return;
@@ -62,9 +70,12 @@ export const ConversationTabItem = observer(function ConversationTabItem({
       } else if (pendingForkRef.current) {
         pendingForkRef.current = false;
         onFork();
+      } else if (pendingShareRef.current) {
+        pendingShareRef.current = false;
+        onShare();
       }
     },
-    [onFork]
+    [onFork, onShare]
   );
 
   const commitRename = (value: string) => {
@@ -155,6 +166,12 @@ export const ConversationTabItem = observer(function ConversationTabItem({
           <ContextMenuItem onClick={handleFork}>
             <GitFork className="size-4" />
             Fork
+          </ContextMenuItem>
+        ) : null}
+        {isShareProvider(tab.store.data.providerId) ? (
+          <ContextMenuItem onClick={handleShare}>
+            <Share2 className="size-4" />
+            Share
           </ContextMenuItem>
         ) : null}
       </ContextMenuContent>
