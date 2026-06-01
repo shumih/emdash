@@ -50,9 +50,8 @@ export function formatConversationTitleForDisplay(
  * Compute the next `${prefix}-${index}` title that does not collide with any
  * existing conversation title. Indexes count up from 1, filling gaps.
  *
- * The full title is what gets passed to the agent as its session name, so the
- * prefix should be human-meaningful (task name by default, or whatever the user
- * typed in the modal).
+ * Callers can use the result as a generated title or as a placeholder. The
+ * prefix should be human-meaningful, usually the task name.
  */
 export function nextIndexedConversationTitle(
   prefix: string,

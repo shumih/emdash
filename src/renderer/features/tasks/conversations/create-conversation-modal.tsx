@@ -32,11 +32,11 @@ export const CreateConversationModal = observer(function CreateConversationModal
   const conversationMgr = conversationRegistry.get(taskId);
   const autoApproveDefaults = useAgentAutoApproveDefaults();
   const taskName = taskDisplayName(getTaskStore(projectId, taskId)) ?? '';
-  const [nameInput, setNameInput] = useState(taskName);
+  const [nameInput, setNameInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const skipPermissions = providerId ? autoApproveDefaults.getDefault(providerId) : false;
-  const effectivePrefix = nameInput.trim() || taskName;
+  const title = nameInput.trim();
   const existingTitles = useMemo(
     () =>
       Array.from(conversationMgr?.conversations.values() ?? [], (conversation) => ({
@@ -45,10 +45,10 @@ export const CreateConversationModal = observer(function CreateConversationModal
       })),
     [conversationMgr]
   );
-  const title = nextIndexedConversationTitle(effectivePrefix, existingTitles);
+  const placeholderTitle = nextIndexedConversationTitle(taskName, existingTitles);
 
   const handleCreateConversation = useCallback(async () => {
-    if (createDisabled || isSubmitting || !conversationMgr || !providerId) return;
+    if (createDisabled || isSubmitting || !conversationMgr || !providerId || !title) return;
     const id = crypto.randomUUID();
     setIsSubmitting(true);
     setError(null);
@@ -91,10 +91,10 @@ export const CreateConversationModal = observer(function CreateConversationModal
               autoFocus
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
-              placeholder={taskName}
+              placeholder={placeholderTitle}
               onFocus={(e) => e.currentTarget.select()}
             />
-            <p className="text-xs text-foreground-passive">Session name: {title}</p>
+            {title && <p className="text-xs text-foreground-passive">Session name: {title}</p>}
           </Field>
           <Field>
             <FieldLabel>Agent</FieldLabel>
@@ -122,7 +122,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
       <DialogFooter>
         <ConfirmButton
           onClick={() => void handleCreateConversation()}
-          disabled={createDisabled || isSubmitting}
+          disabled={createDisabled || isSubmitting || !title}
         >
           {isSubmitting ? 'Creating...' : 'Create'}
         </ConfirmButton>
