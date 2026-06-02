@@ -67,9 +67,22 @@ export async function locateTranscriptFile(
   cwd?: string
 ): Promise<string | null> {
   if (provider === 'claude') {
-    if (!cwd) return null;
-    const rel = claudeRelPath(cwd, sessionId);
-    return (await homeFs.exists(rel)) ? rel : null;
+    // Fast path: the cwd we have should match the cwd Claude saw at spawn.
+    if (cwd) {
+      const rel = claudeRelPath(cwd, sessionId);
+      if (await homeFs.exists(rel)) return rel;
+    }
+    // Fallback: cwd may have been resolved differently by Claude (symlinks,
+    // different absolute form), so the encoded-cwd dir doesn't match what we
+    // compute. Find the transcript by its session-id basename across all
+    // project dirs — that's deterministic regardless of cwd encoding.
+    try {
+      const matches = await homeFs.glob(`.claude/projects/*/${sessionId}.jsonl`, { dot: true });
+      return matches.length > 0 ? matches[0] : null;
+    } catch (err) {
+      log.warn('locateTranscriptFile: claude glob fallback failed', { error: String(err) });
+      return null;
+    }
   }
   const pattern = provider === 'codex' ? codexReadGlob(sessionId) : cursorReadGlob(sessionId);
   try {
