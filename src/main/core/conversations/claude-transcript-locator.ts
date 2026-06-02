@@ -41,6 +41,36 @@ export async function listClaudeSessionIds(
 }
 
 /**
+ * Best-effort: return the session id of the most recently modified transcript
+ * file under Claude's project dir for the given cwd, or null if none exist.
+ *
+ * Used as a fallback at share/lookup time when `providerSessionId` was never
+ * captured (e.g. conversation predates capture, reconcile timed out, or cwd
+ * mismatch). Single‑transcript dirs are unambiguous; multi-transcript dirs
+ * resolve to the freshest, which is almost always what the user just used.
+ */
+export async function findMostRecentClaudeSession(
+  fs: Pick<FileSystemProvider, 'list'>,
+  cwd: string
+): Promise<string | null> {
+  const dir = `.claude/projects/${encodeClaudeProjectDir(cwd)}`;
+  try {
+    const result = await fs.list(dir, { includeHidden: true, maxEntries: 10000 });
+    let best: { sid: string; mtime: number } | null = null;
+    for (const entry of result.entries) {
+      const name = entry.path.split(/[\\/]/).pop() ?? '';
+      if (!name.endsWith('.jsonl')) continue;
+      const sid = name.slice(0, -'.jsonl'.length);
+      const mtime = entry.mtime?.getTime() ?? 0;
+      if (!best || mtime > best.mtime) best = { sid, mtime };
+    }
+    return best?.sid ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Return the single new session id that appeared in `after` but not in
  * `before`. If zero or more than one appeared, returns undefined — we never
  * guess when the attribution is ambiguous (e.g. two sessions sharing a cwd).
