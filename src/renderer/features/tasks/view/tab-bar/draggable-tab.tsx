@@ -15,6 +15,13 @@ export function DraggableTab({ id, children }: { id: string; children: React.Rea
         height: '100%',
         alignItems: 'center',
         position: 'relative',
+        // VS Code / Cursor behavior: tabs grow to share the bar's width but cap
+        // at a sensible max so a single tab doesn't span the whole bar. With
+        // many tabs they shrink (min-width: 0 allows it) and the bar's
+        // overflow-x-auto scrolls.
+        flex: '1 1 0',
+        minWidth: 0,
+        maxWidth: '280px',
       }}
       {...attributes}
       {...listeners}

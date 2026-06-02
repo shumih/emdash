@@ -106,7 +106,7 @@ export const ConversationTabItem = observer(function ConversationTabItem({
             el?.focus();
             el?.select();
           }}
-          className="max-w-24 rounded bg-background-1 px-1 py-0.5 text-sm text-foreground ring-1 ring-foreground/20 outline-none focus:ring-foreground/40"
+          className="max-w-48 rounded bg-background-1 px-1 py-0.5 text-sm text-foreground ring-1 ring-foreground/20 outline-none focus:ring-foreground/40"
           defaultValue={rawTitle}
           onBlur={(e) => commitRename(e.target.value)}
           onKeyDown={(e) => {
@@ -143,7 +143,7 @@ export const ConversationTabItem = observer(function ConversationTabItem({
               className="size-4 shrink-0"
             />
           ) : null}
-          <TabTitle isActive={tab.isActive} isPreview={tab.isPreview} maxWidth="max-w-24">
+          <TabTitle isActive={tab.isActive} isPreview={tab.isPreview} maxWidth="max-w-48">
             {title}
           </TabTitle>
           <TabCloseButton
@@ -198,7 +198,7 @@ export const ConversationTabDragPreview = observer(function ConversationTabDragP
           className="size-4 shrink-0"
         />
       ) : null}
-      <span className="max-w-[200px] truncate">{label}</span>
+      <span className="max-w-[400px] truncate">{label}</span>
     </TabDragPreviewShell>
   );
 });

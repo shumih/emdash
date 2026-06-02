@@ -56,13 +56,15 @@ export const TabItemShell = observer(function TabItemShell({
         title={title}
         data-tabid={tabId}
         className={cn(
-          'group relative flex h-full flex-col bg-background-secondary hover:bg-background-secondary-1 text-sm hover:bg-muted',
+          // flex-1 + min-w-0 lets the button fill its DraggableTab parent (which
+          // is itself flex-1 capped at max-w-[280px]), so tabs grow with the bar.
+          'group relative flex h-full min-w-0 flex-1 flex-col bg-background-secondary hover:bg-background-secondary-1 text-sm hover:bg-muted',
           className,
           isActive && 'bg-background-secondary-1 text-foreground-muted',
           isFocused && 'text-foreground'
         )}
       >
-        <div className={cn('flex h-full items-center gap-1.5 pl-3', innerPaddingRight)}>
+        <div className={cn('flex h-full min-w-0 items-center gap-1.5 pl-3', innerPaddingRight)}>
           {children}
         </div>
       </button>

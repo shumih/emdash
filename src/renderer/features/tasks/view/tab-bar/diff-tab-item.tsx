@@ -76,7 +76,7 @@ export function DiffTabDragPreview({ tab }: { tab: ResolvedDiffTab }) {
       <span className="shrink-0 [&>svg]:h-3 [&>svg]:w-3">
         <FileIcon filename={fileName} />
       </span>
-      <span className="max-w-[200px] truncate">{`${fileName} ${suffix}`}</span>
+      <span className="max-w-[400px] truncate">{`${fileName} ${suffix}`}</span>
     </TabDragPreviewShell>
   );
 }
