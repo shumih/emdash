@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RawBundle } from '@shared/shared-sessions';
 
-// The module under test pulls in @main/db/client transitively (settings +
-// secrets stores), whose module-load opens a real SQLite DB via electron's
-// app.getPath — crashes under plain Node. Stub it; the tests construct
-// HttpSessionShareStore with their own resolveConfig and never touch the DB.
+// The module under test pulls in @main/db/client transitively (settings store)
+// whose module-load opens a real SQLite DB via electron's app.getPath — crashes
+// under plain Node. Stub it; the tests construct HttpSessionShareStore with
+// their own resolveConfig and never touch the DB.
 vi.mock('@main/db/client', () => ({ db: {}, sqlite: {} }));
 vi.mock('electron', () => ({ safeStorage: {}, app: { getPath: () => '/tmp' } }));
 
@@ -41,17 +41,13 @@ describe('HttpSessionShareStore.save', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: 'tk',
     }));
     const result = await store.save({ shareId: 'sid-1', bundle: bundle() });
 
     expect(result).toEqual({ ref: 'abc123', url: 'https://example/abc123' });
     expect(captured.url).toBe('http://example.com/v1/sessions');
     expect(captured.init?.method).toBe('POST');
-    expect(captured.init?.headers).toMatchObject({
-      'content-type': 'application/json',
-      authorization: 'Bearer tk',
-    });
+    expect(captured.init?.headers).toEqual({ 'content-type': 'application/json' });
     expect(JSON.parse(captured.init?.body as string)).toEqual({
       shareId: 'sid-1',
       bundle: bundle(),
@@ -68,7 +64,6 @@ describe('HttpSessionShareStore.save', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1///',
-      token: null,
     }));
     await store.save({ shareId: 's', bundle: bundle() });
     expect(captured.url).toBe('http://example.com/v1/sessions');
@@ -79,7 +74,6 @@ describe('HttpSessionShareStore.save', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: false,
       baseUrl: 'http://example.com/v1',
-      token: 'tk',
     }));
     await expect(store.save({ shareId: 's', bundle: bundle() })).rejects.toBeInstanceOf(
       SessionSharingDisabledError
@@ -87,11 +81,7 @@ describe('HttpSessionShareStore.save', () => {
   });
 
   it('throws SessionSharingDisabledError when no endpoint is configured', async () => {
-    const store = new HttpSessionShareStore(async () => ({
-      enabled: true,
-      baseUrl: '',
-      token: null,
-    }));
+    const store = new HttpSessionShareStore(async () => ({ enabled: true, baseUrl: '' }));
     await expect(store.save({ shareId: 's', bundle: bundle() })).rejects.toBeInstanceOf(
       SessionSharingDisabledError
     );
@@ -102,7 +92,6 @@ describe('HttpSessionShareStore.save', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: null,
     }));
     await expect(store.save({ shareId: 's', bundle: bundle() })).rejects.toThrow(/500/);
   });
@@ -112,7 +101,6 @@ describe('HttpSessionShareStore.save', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: null,
     }));
     await expect(store.save({ shareId: 's', bundle: bundle() })).rejects.toThrow(/no ref/i);
   });
@@ -120,22 +108,19 @@ describe('HttpSessionShareStore.save', () => {
 
 describe('HttpSessionShareStore.get', () => {
   it('GETs /sessions/{ref}?target=<provider> and returns the converted bundle', async () => {
-    const captured: { url?: string; init?: RequestInit } = {};
+    const captured: { url?: string } = {};
     const expected = bundle();
-    mockFetch(async (url, init) => {
+    mockFetch(async (url) => {
       captured.url = url;
-      captured.init = init;
       return jsonResponse(200, expected);
     });
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: 'tk',
     }));
     const result = await store.get('abc/123', { targetProvider: 'codex' });
     expect(result).toEqual(expected);
     expect(captured.url).toBe('http://example.com/v1/sessions/abc%2F123?target=codex');
-    expect(captured.init?.headers).toMatchObject({ authorization: 'Bearer tk' });
   });
 
   it('returns null on 404 (not an error)', async () => {
@@ -143,7 +128,6 @@ describe('HttpSessionShareStore.get', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: null,
     }));
     expect(await store.get('missing', { targetProvider: 'claude' })).toBeNull();
   });
@@ -153,7 +137,6 @@ describe('HttpSessionShareStore.get', () => {
     const store = new HttpSessionShareStore(async () => ({
       enabled: true,
       baseUrl: 'http://example.com/v1',
-      token: null,
     }));
     await expect(store.get('r', { targetProvider: 'claude' })).rejects.toThrow(/502/);
   });

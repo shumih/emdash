@@ -1,4 +1,3 @@
-import { encryptedAppSecretsStore } from '@main/core/secrets/encrypted-app-secrets-store';
 import { appSettingsService } from '@main/core/settings/settings-service';
 import type {
   RawBundle,
@@ -7,9 +6,6 @@ import type {
   ShareProviderId,
   ShareRef,
 } from '@shared/shared-sessions';
-
-/** Secret-storage key for the storage service auth token. */
-export const SESSION_SHARING_TOKEN_KEY = 'sessionSharing.token';
 
 export class SessionSharingDisabledError extends Error {
   constructor(
@@ -33,17 +29,8 @@ export class HttpSessionShareStore implements SessionShareStore {
     private readonly resolveConfig: () => Promise<{
       enabled: boolean;
       baseUrl: string;
-      token: string | null;
     }>
   ) {}
-
-  private async headers(): Promise<Record<string, string>> {
-    const { token } = await this.resolveConfig();
-    return {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    };
-  }
 
   /**
    * Resolve the base URL, enforcing the `enabled` kill switch and a configured
@@ -59,7 +46,7 @@ export class HttpSessionShareStore implements SessionShareStore {
   async save(input: { shareId: string; bundle: RawBundle }): Promise<SaveResult> {
     const res = await fetch(`${await this.base()}/sessions`, {
       method: 'POST',
-      headers: await this.headers(),
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify(input),
     });
     if (!res.ok) {
@@ -72,7 +59,7 @@ export class HttpSessionShareStore implements SessionShareStore {
 
   async get(ref: ShareRef, opts: { targetProvider: ShareProviderId }): Promise<RawBundle | null> {
     const url = `${await this.base()}/sessions/${encodeURIComponent(ref)}?target=${opts.targetProvider}`;
-    const res = await fetch(url, { headers: await this.headers() });
+    const res = await fetch(url);
     if (res.status === 404) return null;
     if (!res.ok) {
       throw new Error(`Share fetch failed: ${res.status} ${res.statusText}`);
@@ -82,12 +69,10 @@ export class HttpSessionShareStore implements SessionShareStore {
 }
 
 /**
- * The default store wired to app settings (endpoint URL) + secure storage
- * (auth token). Reads config lazily on each call so changes take effect without
- * a restart.
+ * The default store wired to app settings. Reads config lazily on each call so
+ * changes take effect without a restart.
  */
 export const sessionShareStore = new HttpSessionShareStore(async () => {
   const settings = await appSettingsService.get('sessionSharing');
-  const token = await encryptedAppSecretsStore.getSecret(SESSION_SHARING_TOKEN_KEY);
-  return { enabled: settings.enabled, baseUrl: settings.endpointUrl, token };
+  return { enabled: settings.enabled, baseUrl: settings.endpointUrl };
 });

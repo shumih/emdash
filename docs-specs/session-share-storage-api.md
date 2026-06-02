@@ -24,7 +24,7 @@
 |---|---|
 | Транспорт | HTTP/HTTPS, JSON (`application/json; charset=utf-8`) |
 | База URL | настраивается пользователем (`Settings → Integrations`), без хвостовых `/` |
-| Аутентификация | `Authorization: Bearer <token>` (опционально, см. §3) |
+| Аутентификация | **не требуется** — клиент не отправляет заголовков авторизации |
 | Кодирование файлов | всегда **base64** (binary‑safe; важно для бинарного `store.db` Cursor) |
 | Идемпотентность | сохранение идемпотентно по `shareId` (см. §6) |
 | Конвертация | на стороне сервиса, при запросе `GET` с параметром `target` |
@@ -82,11 +82,8 @@
 
 ## 3. Аутентификация
 
-- Если пользователь задал токен, клиент шлёт `Authorization: Bearer <token>` на **все**
-  запросы.
-- Если токен не задан, заголовок не отправляется. Сервис вправе требовать токен и
-  отвечать `401`.
-- Рекомендуется привязывать `ref` к владельцу/токену и не отдавать чужие сессии.
+Клиент **не отправляет** заголовков авторизации. Сервис открытый. Если в будущем
+понадобится auth — менять контракт нужно с обеих сторон одновременно.
 
 ---
 
@@ -101,7 +98,6 @@
 
 ```
 POST {base}/sessions
-Authorization: Bearer <token>        // если задан
 Content-Type: application/json
 ```
 
@@ -136,7 +132,6 @@ Content-Type: application/json
 
 ```
 GET {base}/sessions/{ref}?target=claude
-Authorization: Bearer <token>        // если задан
 ```
 
 `ref` проходит через `encodeURIComponent`. `target` ∈ `{claude, codex, cursor}`.
@@ -239,7 +234,6 @@ Authorization: Bearer <token>        // если задан
 |---|---|---|
 | `200` | успех save/get | обрабатывает тело |
 | `400` | некорректный бандл/таргет | ошибка загрузки |
-| `401`/`403` | нет/неверный токен | ошибка |
 | `404` | `GET` несуществующего `ref` | «сессии нет» (не ошибка) |
 | `409` | конфликт идемпотентности | следует избегать — вернуть `200` с тем же `ref` |
 | `413` | слишком большой бандл | ошибка |
@@ -280,7 +274,6 @@ Authorization: Bearer <token>        // если задан
 ```http
 POST /v1/sessions HTTP/1.1
 Host: share.example.com
-Authorization: Bearer sk_live_...
 Content-Type: application/json
 
 {
@@ -305,7 +298,6 @@ Content-Type: application/json
 ```http
 GET /v1/sessions/abc123?target=codex HTTP/1.1
 Host: share.example.com
-Authorization: Bearer sk_live_...
 ```
 
 ```http
@@ -337,6 +329,5 @@ HTTP/1.1 404 Not Found
 - [ ] `GET /sessions/{ref}?target=<provider>` отдаёт `RawBundle` в формате `target` или `404`.
 - [ ] Парсеры источников: Claude JSONL, Codex rollout JSONL, Cursor SQLite blob‑store.
 - [ ] Сериализаторы целей: те же три формата; `target == source` — lossless.
-- [ ] Bearer‑аутентификация и изоляция доступа по владельцу `ref`.
-- [ ] Лимиты размера, шифрование at‑rest, TTL/удаление.
+- [ ] Лимиты размера, TTL/удаление.
 - [ ] Корректная работа с base64 для бинарного `store.db`.
