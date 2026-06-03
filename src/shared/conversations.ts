@@ -1,4 +1,4 @@
-import type { AgentProviderId } from '@shared/agent-provider-registry';
+import { getProvider, type AgentProviderId } from '@shared/agent-provider-registry';
 
 export type Conversation = {
   id: string;
@@ -67,18 +67,48 @@ export type CreateConversationParams = {
   sourceTargetProvider?: string;
 };
 
+/**
+ * Detect whether a conversation title is the auto-generated default for the
+ * provider — i.e. exactly the provider name (`Claude Code`) or the indexed
+ * form for disambiguation (`Claude Code-2`). The bare default carries no
+ * information beyond "this is the provider", so we drop it from the CLI
+ * session name; the indexed form keeps just its number so the CLI sees
+ * `task-2` instead of `task-Claude Code-2`.
+ */
+function classifyDefaultTitle(
+  title: string,
+  providerName: string
+): { isDefault: boolean; suffix?: string } {
+  if (title === providerName) return { isDefault: true };
+  if (title.startsWith(`${providerName}-`)) {
+    const tail = title.slice(providerName.length + 1);
+    if (/^[1-9]\d*$/.test(tail)) return { isDefault: true, suffix: tail };
+  }
+  return { isDefault: false };
+}
+
 export function buildProviderSessionName({
   taskName,
   conversationTitle,
+  providerId,
 }: {
   taskName: string;
   conversationTitle?: string | null;
+  providerId?: AgentProviderId;
 }): string {
   const task = taskName.trim();
   const title = conversationTitle?.trim() ?? '';
 
   if (!task) return title;
   if (!title) return task;
+
+  if (providerId) {
+    const providerName = getProvider(providerId)?.name;
+    if (providerName) {
+      const { isDefault, suffix } = classifyDefaultTitle(title, providerName);
+      if (isDefault) return suffix ? `${task}-${suffix}` : task;
+    }
+  }
 
   return `${task}-${title}`;
 }

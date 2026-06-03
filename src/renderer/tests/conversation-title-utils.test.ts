@@ -99,4 +99,41 @@ describe('buildProviderSessionName', () => {
       'Claude Code'
     );
   });
+
+  it('drops the conversation title when it equals the provider default name', () => {
+    expect(
+      buildProviderSessionName({
+        taskName: 'analytics',
+        conversationTitle: 'Claude Code',
+        providerId: 'claude',
+      })
+    ).toBe('analytics');
+  });
+
+  it('uses just the index when the title is the indexed provider default', () => {
+    expect(
+      buildProviderSessionName({
+        taskName: 'analytics',
+        conversationTitle: 'Claude Code-2',
+        providerId: 'claude',
+      })
+    ).toBe('analytics-2');
+    expect(
+      buildProviderSessionName({
+        taskName: 'analytics',
+        conversationTitle: 'Claude Code-10',
+        providerId: 'claude',
+      })
+    ).toBe('analytics-10');
+  });
+
+  it('preserves user-chosen titles even when providerId is given', () => {
+    expect(
+      buildProviderSessionName({
+        taskName: 'analytics',
+        conversationTitle: 'investigate-prompt',
+        providerId: 'claude',
+      })
+    ).toBe('analytics-investigate-prompt');
+  });
 });

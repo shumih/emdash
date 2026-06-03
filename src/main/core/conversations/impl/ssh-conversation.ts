@@ -110,6 +110,7 @@ export class SshConversationProvider implements ConversationProvider {
       sessionName: buildProviderSessionName({
         taskName: this.taskName,
         conversationTitle: conversation.title,
+        providerId: conversation.providerId,
       }),
       isResuming,
       initialPrompt,
