@@ -82,10 +82,13 @@ describe('nextProviderConversationTitle', () => {
 });
 
 describe('buildProviderSessionName', () => {
-  it('combines the task name and conversation title', () => {
+  it('joins the task name and conversation title with a dash (no spaces)', () => {
+    expect(
+      buildProviderSessionName({ taskName: 'email-writer', conversationTitle: 'quantization' })
+    ).toBe('email-writer-quantization');
     expect(
       buildProviderSessionName({ taskName: 'fix-login', conversationTitle: 'Claude Code' })
-    ).toBe('fix-login - Claude Code');
+    ).toBe('fix-login-Claude Code');
   });
 
   it('falls back to whichever side is present', () => {

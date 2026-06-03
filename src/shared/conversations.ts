@@ -80,5 +80,5 @@ export function buildProviderSessionName({
   if (!task) return title;
   if (!title) return task;
 
-  return `${task} - ${title}`;
+  return `${task}-${title}`;
 }
