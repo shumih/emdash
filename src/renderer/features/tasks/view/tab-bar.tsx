@@ -2,6 +2,7 @@ import { useHotkey } from '@tanstack/react-hotkeys';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useRef, type ReactNode } from 'react';
 import { useAppSettingsKey } from '@renderer/features/settings/use-app-settings-key';
+import { shareCurrentSession } from '@renderer/features/shared-sessions/share-action';
 import { useTabGroupContext } from '@renderer/features/tasks/tabs/tab-group-context';
 import {
   useConversations,
@@ -75,7 +76,6 @@ export const TabBar = observer(function TabBar() {
   const conversations = useConversations();
   const { taskId } = useTaskViewContext();
   const showForkModal = useShowModal('forkConversationModal');
-  const showShareModal = useShowModal('shareSessionModal');
   const { value: keyboard } = useAppSettingsKey('keyboard');
 
   const openForkModal = useCallback(
@@ -93,21 +93,26 @@ export const TabBar = observer(function TabBar() {
     [conversations, tabManager, taskId, showForkModal]
   );
 
-  const openShareModal = useCallback(
+  const shareSessionInPlace = useCallback(
     (conversationId: string) => {
       const source = conversations.conversations.get(conversationId);
       if (!source) return;
-      showShareModal({
+      void shareCurrentSession({
         projectId: source.data.projectId,
         taskId,
         conversationId,
         title: source.data.title,
       });
     },
-    [conversations, taskId, showShareModal]
+    [conversations, taskId]
   );
 
-  const tabRenderers = makeTabRenderers(tabManager, conversations, openForkModal, openShareModal);
+  const tabRenderers = makeTabRenderers(
+    tabManager,
+    conversations,
+    openForkModal,
+    shareSessionInPlace
+  );
 
   const isFocusedPane =
     taskView.focusedRegion === 'main' && tabGroupManager.activeGroupId === groupId;

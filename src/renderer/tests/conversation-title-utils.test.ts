@@ -67,17 +67,36 @@ describe('formatConversationTitleForDisplay', () => {
 });
 
 describe('nextProviderConversationTitle', () => {
-  it('uses the provider name for the first conversation', () => {
-    expect(nextProviderConversationTitle('claude', [])).toBe('Claude Code');
+  it('uses "main" for the first conversation', () => {
+    expect(nextProviderConversationTitle([])).toBe('main');
   });
 
-  it('indexes provider names only after collisions', () => {
-    const title = nextProviderConversationTitle('claude', [
-      { providerId: 'claude', title: 'Claude Code' },
-      { providerId: 'claude', title: 'Claude Code-3' },
-    ]);
+  it('numbers later collisions of "main"', () => {
+    expect(nextProviderConversationTitle([{ providerId: 'claude', title: 'main' }])).toBe('main-2');
+    expect(
+      nextProviderConversationTitle([
+        { providerId: 'claude', title: 'main' },
+        { providerId: 'claude', title: 'main-3' },
+      ])
+    ).toBe('main-2');
+  });
 
-    expect(title).toBe('Claude Code-2');
+  it('ignores legacy provider-named titles when picking a new one', () => {
+    // Old conv with provider-name title shouldn't block fresh "main".
+    expect(nextProviderConversationTitle([{ providerId: 'claude', title: 'Claude Code' }])).toBe(
+      'main'
+    );
+  });
+
+  it('treats "main" and legacy provider-name as independent counters', () => {
+    // Tasks that pre-date the "main" default may have `Claude Code` rows;
+    // adding a fresh conversation should still use the `main` lineage.
+    expect(
+      nextProviderConversationTitle([
+        { providerId: 'claude', title: 'Claude Code' },
+        { providerId: 'claude', title: 'main' },
+      ])
+    ).toBe('main-2');
   });
 });
 

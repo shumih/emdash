@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from '@renderer/lib/ui/select';
 import { SHARE_PROVIDERS, type ShareProviderId } from '@shared/shared-sessions';
+import { extractShareRef } from './share-ref';
 
 type ApplySharedSessionModalArgs = {
   projectId: string;
@@ -57,9 +58,7 @@ export function ApplySharedSessionModal({
     setError(null);
     try {
       // Accept either a bare ref or a full URL whose last path segment is the ref.
-      const parsedRef = trimmedRef.includes('/')
-        ? (trimmedRef.split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? trimmedRef)
-        : trimmedRef;
+      const parsedRef = extractShareRef(trimmedRef);
       await rpc.sharedSessions.applySharedSession({
         ref: parsedRef,
         projectId,

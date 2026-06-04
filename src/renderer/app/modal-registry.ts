@@ -8,7 +8,6 @@ import { ShareProjectConfigModal } from '@renderer/features/projects/components/
 import { GithubConnectModal } from '@renderer/features/settings/components/github-connect-modal';
 import { ApplySharedSessionModal } from '@renderer/features/shared-sessions/apply-shared-session-modal';
 import { SearchSessionsModal } from '@renderer/features/shared-sessions/search-sessions-modal';
-import { ShareSessionModal } from '@renderer/features/shared-sessions/share-session-modal';
 import { CreateSkillModal } from '@renderer/features/skills/components/CreateSkillModal';
 import { AddRemoteModal } from '@renderer/features/tasks/add-remote-modal';
 import { CreateConversationModal } from '@renderer/features/tasks/conversations/create-conversation-modal';
@@ -66,7 +65,6 @@ export const modalRegistry = {
   githubConnectModal: createModal(GithubConnectModal, { size: 'md' }),
   addRemoteModal: createModal(AddRemoteModal),
   deleteTaskModal: createModal(DeleteTaskModal, { size: 'sm' }),
-  shareSessionModal: createModal(ShareSessionModal, { size: 'sm' }),
   applySharedSessionModal: createModal(ApplySharedSessionModal, { size: 'sm' }),
   searchSessionsModal: createModal(SearchSessionsModal, { size: 'md' }),
   // oxlint-disable-next-line typescript/no-explicit-any

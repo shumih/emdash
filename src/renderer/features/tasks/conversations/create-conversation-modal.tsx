@@ -46,7 +46,7 @@ export const CreateConversationModal = observer(function CreateConversationModal
     [conversationMgr]
   );
   const placeholderTitle = providerId
-    ? nextProviderConversationTitle(providerId, existingTitles)
+    ? nextProviderConversationTitle(existingTitles)
     : taskName || 'Session';
   const conversationTitle = title || placeholderTitle;
 

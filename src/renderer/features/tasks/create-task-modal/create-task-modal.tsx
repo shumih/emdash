@@ -1,11 +1,13 @@
 import { ChevronRight, FolderOpen } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import {
   getProjectManagerStore,
   getRepositoryStore,
   mountedProjectData,
 } from '@renderer/features/projects/stores/project-selectors';
+import { extractShareRef } from '@renderer/features/shared-sessions/share-ref';
 import { buildLinkedIssueContextAction } from '@renderer/features/tasks/conversations/context-actions';
 import { nextProviderConversationTitle } from '@renderer/features/tasks/conversations/conversation-title-utils';
 import { resolveContextActionText } from '@renderer/features/tasks/conversations/resolve-context-action-text';
@@ -13,6 +15,7 @@ import { ProjectSelector } from '@renderer/features/tasks/create-task-modal/proj
 import { useAgentAutoApproveDefaults } from '@renderer/features/tasks/hooks/useAgentAutoApproveDefaults';
 import { useTaskSettings } from '@renderer/features/tasks/hooks/useTaskSettings';
 import { useFeatureFlag } from '@renderer/lib/hooks/useFeatureFlag';
+import { rpc } from '@renderer/lib/ipc';
 import { useNavigate } from '@renderer/lib/layout/navigation-provider';
 import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { appState } from '@renderer/lib/stores/app-state';
@@ -35,13 +38,15 @@ import {
 import { FromBranchContent } from './from-branch-content';
 import { FromIssueContent } from './from-issue-content';
 import { FromPrContent } from './from-pr-content';
+import { FromSharedLinkContent } from './from-shared-link-content';
 import { useInitialConversationState } from './initial-conversation-section';
 import { hasInitialIssueContext, upsertInitialIssueContext } from './initial-conversation-text';
 import { useFromBranchMode } from './use-from-branch-mode';
 import { useFromIssueMode } from './use-from-issue-mode';
 import { useFromPullRequestMode } from './use-from-pull-request-mode';
+import { useFromSharedLinkMode } from './use-from-shared-link-mode';
 
-type CreateTaskStrategy = 'from-branch' | 'from-issue' | 'from-pull-request';
+type CreateTaskStrategy = 'from-branch' | 'from-issue' | 'from-pull-request' | 'from-shared-link';
 
 export const CreateTaskModal = observer(function CreateTaskModal({
   projectId,
@@ -106,11 +111,15 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   const fromBranch = useFromBranchMode(selectedProjectId, defaultBranch, isUnborn, currentBranch);
   const fromIssue = useFromIssueMode(selectedProjectId, defaultBranch, isUnborn, currentBranch);
   const fromPR = useFromPullRequestMode(selectedProjectId, defaultBranch, isUnborn, initialPR);
+  // Shares the same branch picker / task name state as From Branch — switching
+  // tabs preserves the user's choices and avoids a duplicate generateTaskName RPC.
+  const fromSharedLink = useFromSharedLinkMode(fromBranch);
 
   const activeMode = {
     'from-branch': fromBranch,
     'from-issue': fromIssue,
     'from-pull-request': fromPR,
+    'from-shared-link': fromSharedLink,
   }[selectedStrategy];
   const fromPrUnavailable = selectedStrategy === 'from-pull-request' && !pullRequestRepositoryUrl;
   const canCreate = !!selectedProjectId && activeMode.isValid && !fromPrUnavailable && !isCreating;
@@ -148,7 +157,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
             projectId: selectedProjectId,
             taskId: id,
             provider: initialConversation.provider,
-            title: nextProviderConversationTitle(initialConversation.provider, []),
+            title: nextProviderConversationTitle([]),
             initialPrompt: initialPrompt.trim() || undefined,
             autoApprove: autoApproveDefaults.getDefault(initialConversation.provider),
           }
@@ -219,6 +228,55 @@ export const CreateTaskModal = observer(function CreateTaskModal({
           });
           break;
         }
+        case 'from-shared-link': {
+          if (!fromSharedLink.selectedBranch) return;
+          const taskStrategy = resolveBranchLikeTaskStrategy({
+            isUnborn,
+            createBranchAndWorktree: fromSharedLink.createBranchAndWorktree,
+            taskBranch: fromSharedLink.branchName,
+            pushBranch: fromSharedLink.pushBranch,
+          });
+          // taskManager.createTask awaits provisionTask internally, but for
+          // branch_elsewhere/path_missing resolutions it returns successfully
+          // while leaving the task in `unprovisioned` (workspace needs user
+          // resolution). We must check the store state — applySharedSession
+          // against a half-provisioned task would write the transcript to a
+          // stale cwd and resume into a worktree that doesn't exist.
+          await projectStore.mountedProject!.taskManager.createTask({
+            id,
+            projectId: selectedProjectId,
+            name: fromSharedLink.taskName,
+            sourceBranch: fromSharedLink.selectedBranch,
+            strategy: useBYOI ? { kind: 'no-worktree' } : taskStrategy,
+            workspaceProvider: useBYOI ? 'byoi' : undefined,
+            // No initialConversation — the imported one is created below.
+          });
+          const created = projectStore.mountedProject!.taskManager.tasks.get(id);
+          if (created?.state !== 'provisioned') {
+            toast.error('Task needs workspace resolution before importing', {
+              description:
+                'Open the task and resolve the workspace, then use "Add Shared Session" to import.',
+            });
+            break;
+          }
+          const ref = extractShareRef(fromSharedLink.shareLink);
+          try {
+            await rpc.sharedSessions.applySharedSession({
+              ref,
+              projectId: selectedProjectId,
+              taskId: id,
+              targetProvider: fromSharedLink.targetProvider,
+            });
+          } catch (e) {
+            // Task is alive; only the import failed. Surface a toast and still
+            // navigate — the user can retry via "Add Shared Session" from
+            // within the task without re-creating it.
+            toast.error('Could not import shared session', {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          }
+          break;
+        }
       }
 
       navigate('task', { projectId: selectedProjectId, taskId: id });
@@ -232,6 +290,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
     fromBranch,
     fromIssue,
     fromPR,
+    fromSharedLink,
     isUnborn,
     useBYOI,
     initialConversation,
@@ -276,13 +335,19 @@ export const CreateTaskModal = observer(function CreateTaskModal({
           <ToggleGroupItem className="flex-1" value="from-pull-request">
             From Pull Request
           </ToggleGroupItem>
+          <ToggleGroupItem className="flex-1" value="from-shared-link">
+            From Shared Link
+          </ToggleGroupItem>
         </ToggleGroup>
-        {isWorkspaceProviderEnabled && (
-          <div className="flex items-center gap-2">
-            <Switch size="sm" checked={useBYOI} onCheckedChange={setUseBYOI} />
-            <span className="text-muted-foreground text-sm">Run on own infrastructure</span>
-          </div>
-        )}
+        {isWorkspaceProviderEnabled &&
+          selectedStrategy !== 'from-shared-link' && (
+            // BYOI workspaces don't expose a local cwd for the share importer to
+            // write into, so we hide the toggle on the From Shared Link tab.
+            <div className="flex items-center gap-2">
+              <Switch size="sm" checked={useBYOI} onCheckedChange={setUseBYOI} />
+              <span className="text-muted-foreground text-sm">Run on own infrastructure</span>
+            </div>
+          )}
       </div>
       <DialogContentArea>
         <AnimatedHeight onAnimatingChange={setIsTransitioning}>
@@ -322,6 +387,14 @@ export const CreateTaskModal = observer(function CreateTaskModal({
                 initialConversation={initialConversation}
               />
             </div>
+          )}
+          {selectedStrategy === 'from-shared-link' && (
+            <FromSharedLinkContent
+              state={fromSharedLink}
+              projectId={selectedProjectId}
+              currentBranch={currentBranch}
+              isUnborn={isUnborn}
+            />
           )}
         </AnimatedHeight>
       </DialogContentArea>

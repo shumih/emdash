@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { rpc } from '@renderer/lib/ipc';
-import { type BaseModalProps, useTransitionModal } from '@renderer/lib/modal/modal-provider';
+import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { Button } from '@renderer/lib/ui/button';
 import { DialogContentArea, DialogHeader, DialogTitle } from '@renderer/lib/ui/dialog';
 import { Input } from '@renderer/lib/ui/input';
 import type { ShareProviderId, ShareSummary } from '@shared/shared-sessions';
+import { shareCurrentSession } from './share-action';
 
 type Props = BaseModalProps<void>;
 
@@ -14,11 +15,10 @@ const PROVIDER_LABELS: Record<ShareProviderId, string> = {
   cursor: 'Cursor',
 };
 
-export function SearchSessionsModal(_props: Props) {
+export function SearchSessionsModal({ onClose }: Props) {
   const [text, setText] = useState('');
   const [results, setResults] = useState<ShareSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const toShare = useTransitionModal('shareSessionModal');
 
   useEffect(() => {
     let alive = true;
@@ -57,14 +57,22 @@ export function SearchSessionsModal(_props: Props) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                toShare({
-                  projectId: s.projectId ?? '',
-                  taskId: s.taskId ?? '',
-                  conversationId: s.conversationId ?? '',
+              // ShareSummary fields are optional for on-disk sessions that
+              // aren't tracked by any tondash conversation — share would fail
+              // deep in the main process with a low-signal "conversation not
+              // found". Gate the button until we have everything we need.
+              disabled={!s.projectId || !s.taskId || !s.conversationId}
+              onClick={() => {
+                if (!s.projectId || !s.taskId || !s.conversationId) return;
+                void shareCurrentSession({
+                  projectId: s.projectId,
+                  taskId: s.taskId,
+                  conversationId: s.conversationId,
                   title: s.title,
-                })
-              }
+                });
+                // Close the picker — the toast carries the link.
+                onClose();
+              }}
             >
               Share
             </Button>
@@ -72,7 +80,7 @@ export function SearchSessionsModal(_props: Props) {
         ))}
       </ul>
     );
-  }, [loading, results, toShare]);
+  }, [loading, results, onClose]);
 
   return (
     <>

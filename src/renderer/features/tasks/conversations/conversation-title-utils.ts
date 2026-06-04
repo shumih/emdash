@@ -1,4 +1,4 @@
-import { getProvider, type AgentProviderId } from '@shared/agent-provider-registry';
+import { type AgentProviderId } from '@shared/agent-provider-registry';
 
 type ConversationTitleInput = {
   providerId: AgentProviderId;
@@ -77,24 +77,25 @@ export function nextIndexedConversationTitle(
   return `${safePrefix}-${next}`;
 }
 
+/** Universal name for a task's first/default conversation. */
+export const DEFAULT_CONVERSATION_TITLE = 'main';
+
 /**
- * Compute the next display title for a provider-backed conversation. The first
- * title is the provider name itself; later collisions use `${providerName}-${n}`.
+ * Compute the next display title for a task's default conversation. The first
+ * title is `main`; later collisions use `main-${n}`. Provider-agnostic by
+ * design so the CLI session name reads `${task}-main` instead of
+ * `${task}-Claude Code`.
  */
-export function nextProviderConversationTitle(
-  providerId: AgentProviderId,
-  conversations: ConversationTitleInput[]
-): string {
-  const providerName = getProvider(providerId)?.name ?? capitalizeProviderId(providerId);
+export function nextProviderConversationTitle(conversations: ConversationTitleInput[]): string {
   const used = new Set<number>();
 
   for (const conversation of conversations) {
-    const index = parseIndexedOrBaseTitle(conversation.title, providerName);
+    const index = parseIndexedOrBaseTitle(conversation.title, DEFAULT_CONVERSATION_TITLE);
     if (index !== null) used.add(index);
   }
 
   let next = 1;
   while (used.has(next)) next += 1;
 
-  return next === 1 ? providerName : `${providerName}-${next}`;
+  return next === 1 ? DEFAULT_CONVERSATION_TITLE : `${DEFAULT_CONVERSATION_TITLE}-${next}`;
 }
