@@ -14,8 +14,8 @@ import { resolveContextActionText } from '@renderer/features/tasks/conversations
 import { ProjectSelector } from '@renderer/features/tasks/create-task-modal/project-selector';
 import { useAgentAutoApproveDefaults } from '@renderer/features/tasks/hooks/useAgentAutoApproveDefaults';
 import { useTaskSettings } from '@renderer/features/tasks/hooks/useTaskSettings';
+import { conversationRegistry } from '@renderer/features/tasks/stores/conversation-registry';
 import { useFeatureFlag } from '@renderer/lib/hooks/useFeatureFlag';
-import { rpc } from '@renderer/lib/ipc';
 import { useNavigate } from '@renderer/lib/layout/navigation-provider';
 import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { appState } from '@renderer/lib/stores/app-state';
@@ -261,7 +261,11 @@ export const CreateTaskModal = observer(function CreateTaskModal({
           }
           const ref = extractShareRef(fromSharedLink.shareLink);
           try {
-            await rpc.sharedSessions.applySharedSession({
+            // Go through the conversation manager so the imported conversation
+            // is registered in the renderer's store and shows up in the new
+            // task view immediately. Calling the RPC directly would create the
+            // row in main + DB but the renderer wouldn't know until reload.
+            await conversationRegistry.get(id)?.applySharedSession({
               ref,
               projectId: selectedProjectId,
               taskId: id,

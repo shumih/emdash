@@ -14,6 +14,7 @@ import {
 } from '@shared/events/agentEvents';
 import { conversationChangedChannel } from '@shared/events/conversationEvents';
 import { makePtySessionId } from '@shared/ptySessionId';
+import { type ApplySharedSessionParams } from '@shared/shared-sessions';
 
 export type AgentStatus = 'idle' | 'working' | 'awaiting-input' | 'error' | 'completed';
 
@@ -199,6 +200,21 @@ export class ConversationManagerStore implements IDisposable {
 
   async forkConversation(conversationId: string, title: string): Promise<Conversation> {
     const conversation = await rpc.conversations.forkConversation({ conversationId, title });
+    runInAction(() => {
+      this.registerConversation(conversation);
+    });
+    return conversation;
+  }
+
+  /**
+   * Import a shared session: RPC creates the conversation row in main and
+   * spawns its resume CLI; here we register the returned conversation in the
+   * renderer-side maps so the new conv shows up in the task view immediately
+   * (mirrors how `forkConversation` works — without this, callers that hit the
+   * RPC directly would create a conv that's only visible after a task reload).
+   */
+  async applySharedSession(params: ApplySharedSessionParams): Promise<Conversation> {
+    const conversation = await rpc.sharedSessions.applySharedSession(params);
     runInAction(() => {
       this.registerConversation(conversation);
     });

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { toast } from 'sonner';
-import { rpc } from '@renderer/lib/ipc';
+import { conversationRegistry } from '@renderer/features/tasks/stores/conversation-registry';
 import { type BaseModalProps } from '@renderer/lib/modal/modal-provider';
 import { Button } from '@renderer/lib/ui/button';
 import { ConfirmButton } from '@renderer/lib/ui/confirm-button';
@@ -59,7 +59,15 @@ export function ApplySharedSessionModal({
     try {
       // Accept either a bare ref or a full URL whose last path segment is the ref.
       const parsedRef = extractShareRef(trimmedRef);
-      await rpc.sharedSessions.applySharedSession({
+      // Going through the conversation manager registers the new conv in the
+      // renderer's store so it shows up in the task view without a reload.
+      const manager = conversationRegistry.get(taskId);
+      if (!manager) {
+        setError('Open the task first, then try again.');
+        setIsApplying(false);
+        return;
+      }
+      await manager.applySharedSession({
         ref: parsedRef,
         projectId,
         taskId,
