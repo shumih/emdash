@@ -149,6 +149,7 @@ describe('SshClientProxy channel health reporting', () => {
     const error = new Error('open failed');
     const reporter = {
       reportChannelError: vi.fn(),
+      reportChannelRecovered: vi.fn(),
     };
     const client = {
       exec: vi
@@ -163,6 +164,7 @@ describe('SshClientProxy channel health reporting', () => {
     proxy.exec('false', vi.fn());
 
     expect(successCallback).toHaveBeenCalledWith(undefined, {});
+    expect(reporter.reportChannelRecovered).toHaveBeenCalledWith('ssh-1');
     expect(reporter.reportChannelError).toHaveBeenCalledWith('ssh-1', error);
   });
 
@@ -171,6 +173,7 @@ describe('SshClientProxy channel health reporting', () => {
     const sftpError = new Error('sftp failed');
     const reporter = {
       reportChannelError: vi.fn(),
+      reportChannelRecovered: vi.fn(),
     };
     const client = {
       exec: vi.fn((_command, _options, callback) => callback(ptyError, undefined)),
@@ -184,5 +187,23 @@ describe('SshClientProxy channel health reporting', () => {
 
     expect(reporter.reportChannelError).toHaveBeenCalledWith('ssh-1', ptyError);
     expect(reporter.reportChannelError).toHaveBeenCalledWith('ssh-1', sftpError);
+    expect(reporter.reportChannelRecovered).not.toHaveBeenCalled();
+  });
+
+  it('reports a successful sftp channel as recovered', () => {
+    const reporter = {
+      reportChannelError: vi.fn(),
+      reportChannelRecovered: vi.fn(),
+    };
+    const client = {
+      sftp: vi.fn((callback) => callback(undefined, {})),
+    };
+    const proxy = new SshClientProxy('ssh-1', reporter);
+    proxy.update(client as never);
+
+    proxy.sftp(vi.fn());
+
+    expect(reporter.reportChannelError).not.toHaveBeenCalled();
+    expect(reporter.reportChannelRecovered).toHaveBeenCalledWith('ssh-1');
   });
 });

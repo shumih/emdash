@@ -31,7 +31,10 @@ export class SshClientProxy {
 
   constructor(
     readonly connectionId: string,
-    private healthReporter?: { reportChannelError(connectionId: string, error: unknown): void }
+    private healthReporter?: {
+      reportChannelError(connectionId: string, error: unknown): void;
+      reportChannelRecovered(connectionId: string): void;
+    }
   ) {}
 
   /** Called by SshConnectionManager when a connection becomes ready. */
@@ -125,6 +128,10 @@ export class SshClientProxy {
       this.healthReporter?.reportChannelError(this.connectionId, err);
       return;
     }
+    // Pulse semantics: every successful channel signals recovery so a transient
+    // MaxSessions failure can't keep the UI stuck in "degraded" forever. The
+    // manager no-ops if the connection wasn't degraded, so steady-state is free.
+    this.healthReporter?.reportChannelRecovered(this.connectionId);
   }
 
   /** Called by SshConnectionManager when the connection drops. */

@@ -547,7 +547,10 @@ describe('SshConnectionManager', () => {
     manager.reportChannelError('ssh-1', new Error('ordinary failure'));
     expect(manager.getAllHealthStates()).toEqual({});
 
-    manager.reportChannelError('ssh-1', { reason: 2, message: 'channel open failure' });
+    manager.reportChannelError('ssh-1', {
+      reason: 4,
+      message: 'channel open failure: resource shortage',
+    });
     expect(manager.getAllHealthStates()).toEqual({ 'ssh-1': { status: 'degraded' } });
 
     manager.reportChannelRecovered('ssh-1');
@@ -556,6 +559,50 @@ describe('SshConnectionManager', () => {
       { type: 'health-changed', connectionId: 'ssh-1', health: { status: 'degraded' } },
       { type: 'health-changed', connectionId: 'ssh-1', health: { status: 'ok' } },
     ]);
+  });
+
+  it('clears degraded health when a subsequent successful channel pulses recovery through the proxy', async () => {
+    const { SshConnectionManager } = await import('./ssh-connection-manager');
+    const { SshClientProxy } = await import('./ssh-client-proxy');
+    const published: unknown[] = [];
+    const manager = new SshConnectionManager({
+      publishEvent: (event) => published.push(event),
+    });
+    const proxy = new SshClientProxy('ssh-1', manager);
+    const client = {
+      exec: vi
+        .fn()
+        .mockImplementationOnce((_command, callback) =>
+          callback(Object.assign(new Error('resource shortage'), { reason: 4 }), undefined)
+        )
+        .mockImplementationOnce((_command, callback) => callback(undefined, {})),
+    };
+    proxy.update(client as never);
+
+    proxy.exec('first', vi.fn());
+    expect(manager.getAllHealthStates()).toEqual({ 'ssh-1': { status: 'degraded' } });
+
+    proxy.exec('second', vi.fn());
+    expect(manager.getAllHealthStates()).toEqual({});
+    expect(published).toEqual([
+      { type: 'health-changed', connectionId: 'ssh-1', health: { status: 'degraded' } },
+      { type: 'health-changed', connectionId: 'ssh-1', health: { status: 'ok' } },
+    ]);
+  });
+
+  it('does not emit duplicate health-changed events on steady-state success', async () => {
+    const { SshConnectionManager } = await import('./ssh-connection-manager');
+    const published: unknown[] = [];
+    const manager = new SshConnectionManager({
+      publishEvent: (event) => published.push(event),
+    });
+
+    manager.reportChannelRecovered('ssh-1');
+    manager.reportChannelRecovered('ssh-1');
+    manager.reportChannelRecovered('ssh-1');
+
+    expect(manager.getAllHealthStates()).toEqual({});
+    expect(published).toEqual([]);
   });
 
   it('rejects persisted connects when production dependencies or rows are missing', async () => {

@@ -14,12 +14,29 @@ describe('isSshChannelOpenFailure', () => {
     expect(isSshChannelOpenFailure(new Error('No more sessions'))).toBe(true);
   });
 
-  it('classifies other ssh2 channel open failures as channel-open-failed', () => {
-    const error = Object.assign(new Error('(SSH) Channel open failure: open failed'), {
-      reason: 2,
-    });
+  it('classifies administratively prohibited as channel-open-failed', () => {
+    const error = Object.assign(
+      new Error('(SSH) Channel open failure: administratively prohibited'),
+      {
+        reason: 1,
+      }
+    );
 
     expect(isSshChannelOpenFailure(error)).toBe(true);
+  });
+
+  it('ignores non-session channel-open failures (connect failed / unknown channel type)', () => {
+    expect(
+      isSshChannelOpenFailure(
+        Object.assign(new Error('(SSH) Channel open failure: open failed'), { reason: 2 })
+      )
+    ).toBe(false);
+
+    expect(
+      isSshChannelOpenFailure(
+        Object.assign(new Error('(SSH) Channel open failure: unknown channel type'), { reason: 3 })
+      )
+    ).toBe(false);
   });
 
   it('ignores unrelated numeric reason fields outside the SSH failure-code range', () => {
