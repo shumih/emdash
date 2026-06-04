@@ -13,6 +13,7 @@ import {
 import { createConversation } from './createConversation';
 import { rewriteClaudeSessionId } from './fork-transcript';
 import { readRawTranscript, writeRawTranscript } from './transcript-io';
+import { parseConversationConfig } from './utils';
 
 /**
  * Fork a conversation: copy its on-disk transcript to a fresh session id (same
@@ -32,6 +33,12 @@ export async function forkConversation(params: ForkConversationParams): Promise<
   // otherwise by the tondash conversation id (what we requested via --session-id).
   const sourceSessionId = src.providerSessionId ?? src.id;
 
+  // Parse source config before touching the filesystem so a malformed row
+  // doesn't leave an orphan transcript behind. parseConversationConfig is
+  // defensive — it never throws — but pulling the read up keeps fork ordering
+  // pure-before-effects regardless.
+  const { autoApprove } = parseConversationConfig(src.config);
+
   const { homeFs } = await resolveConnectionFs(src.projectId);
   const cwd = await getTaskCwd(src.projectId, src.taskId);
 
@@ -49,6 +56,7 @@ export async function forkConversation(params: ForkConversationParams): Promise<
     provider,
     title: params.title,
     providerSessionId: newSessionId,
+    autoApprove,
     resume: true,
   });
 }
