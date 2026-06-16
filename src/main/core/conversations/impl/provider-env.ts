@@ -6,7 +6,15 @@ const OPENCODE_ALLOW_ALL_PERMISSIONS = JSON.stringify({ '*': 'allow' });
 
 export function resolveProviderEnv(
   providerConfig: ProviderCustomConfig | undefined,
-  options: { providerId?: AgentProviderId; autoApprove?: boolean } = {}
+  options: {
+    providerId?: AgentProviderId;
+    autoApprove?: boolean;
+    /**
+     * Per-conversation env (e.g. a subscription token) layered over the
+     * provider-wide custom env so it wins on key collisions.
+     */
+    extraEnv?: Record<string, string>;
+  } = {}
 ): Record<string, string> | undefined {
   const env: Record<string, string> = {};
 
@@ -15,6 +23,10 @@ export function resolveProviderEnv(
   }
 
   for (const [key, value] of Object.entries(providerConfig?.env ?? {})) {
+    if (ENV_NAME_PATTERN.test(key)) env[key] = value;
+  }
+
+  for (const [key, value] of Object.entries(options.extraEnv ?? {})) {
     if (ENV_NAME_PATTERN.test(key)) env[key] = value;
   }
 

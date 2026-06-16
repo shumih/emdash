@@ -51,4 +51,22 @@ describe('resolveProviderEnv', () => {
       resolveProviderEnv(undefined, { providerId: 'claude', autoApprove: true })
     ).toBeUndefined();
   });
+
+  it('merges extraEnv (subscription token) over provider custom env', () => {
+    expect(
+      resolveProviderEnv(
+        { env: { CLAUDE_CODE_OAUTH_TOKEN: 'provider-wide', ANTHROPIC_BASE_URL: 'https://x' } },
+        { providerId: 'claude', extraEnv: { CLAUDE_CODE_OAUTH_TOKEN: 'per-conversation' } }
+      )
+    ).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: 'per-conversation',
+      ANTHROPIC_BASE_URL: 'https://x',
+    });
+  });
+
+  it('validates extraEnv variable names like provider env', () => {
+    expect(
+      resolveProviderEnv(undefined, { extraEnv: { 'INVALID-NAME': 'x', GOOD_NAME: 'y' } })
+    ).toEqual({ GOOD_NAME: 'y' });
+  });
 });

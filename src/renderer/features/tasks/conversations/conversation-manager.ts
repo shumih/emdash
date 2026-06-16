@@ -5,6 +5,7 @@ import type { IDisposable } from '@renderer/lib/stores/lifecycle';
 import { Resource } from '@renderer/lib/stores/resource';
 import { log } from '@renderer/utils/logger';
 import { soundPlayer } from '@renderer/utils/soundPlayer';
+import { traceUserAction } from '@renderer/utils/user-action-trace';
 import { type Conversation, type CreateConversationParams } from '@shared/conversations';
 import {
   agentEventChannel,
@@ -43,8 +44,22 @@ export class ConversationManagerStore implements IDisposable {
     });
 
     const hasPreloaded = preloaded !== undefined;
+    // Measure "time-to-first-conversation-data" — the gap the user sees as an
+    // empty pane (PaneEmptyState) on first task open while resolvedTabs is empty
+    // because no ConversationStore has been created yet.
+    const listOpenSpan = hasPreloaded
+      ? null
+      : traceUserAction('conversation-list-load', { projectId, taskId });
     this.list = new Resource<Conversation[]>(
-      hasPreloaded ? null : () => rpc.conversations.getConversationsForTask(projectId, taskId),
+      hasPreloaded
+        ? null
+        : async () => {
+            listOpenSpan?.step('rpc-start');
+            const data = await rpc.conversations.getConversationsForTask(projectId, taskId);
+            listOpenSpan?.step('rpc-end', { count: data.length });
+            listOpenSpan?.end({ status: 'ok', count: data.length });
+            return data;
+          },
       hasPreloaded ? [] : [{ kind: 'demand' }],
       hasPreloaded ? { init: preloaded } : undefined
     );
@@ -188,22 +203,68 @@ export class ConversationManagerStore implements IDisposable {
   }
 
   async createConversation(params: CreateConversationParams): Promise<Conversation> {
-    const conversation = await rpc.conversations.createConversation(params);
-    runInAction(() => {
-      this.registerConversation(conversation);
-      if (params.initialPrompt?.trim()) {
-        this.conversations.get(conversation.id)?.setWorking();
-      }
+    const span = traceUserAction('create-conversation', {
+      projectId: this.projectId,
+      taskId: this.taskId,
+      provider: params.provider,
+      isInitial: params.isInitialConversation ?? false,
+      hasInitialPrompt: Boolean(params.initialPrompt?.trim()),
     });
-    return conversation;
+    try {
+      const conversation = await rpc.conversations.createConversation(params);
+      span.step('rpc-create-conversation');
+      runInAction(() => {
+        this.registerConversation(conversation);
+        if (params.initialPrompt?.trim()) {
+          this.conversations.get(conversation.id)?.setWorking();
+        }
+      });
+      span.step('register-conversation');
+      span.end({ status: 'ok' });
+      return conversation;
+    } catch (err) {
+      span.end({
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
-  async forkConversation(conversationId: string, title: string): Promise<Conversation> {
-    const conversation = await rpc.conversations.forkConversation({ conversationId, title });
-    runInAction(() => {
-      this.registerConversation(conversation);
+  async forkConversation(
+    conversationId: string,
+    title: string,
+    options?: {
+      model?: string | null;
+      reasoningEffort?: string | null;
+      subscriptionId?: string | null;
+    }
+  ): Promise<Conversation> {
+    const span = traceUserAction('fork-conversation', {
+      projectId: this.projectId,
+      taskId: this.taskId,
+      sourceConversationId: conversationId,
     });
-    return conversation;
+    try {
+      const conversation = await rpc.conversations.forkConversation({
+        conversationId,
+        title,
+        ...options,
+      });
+      span.step('rpc-fork-conversation');
+      runInAction(() => {
+        this.registerConversation(conversation);
+      });
+      span.step('register-conversation');
+      span.end({ status: 'ok' });
+      return conversation;
+    } catch (err) {
+      span.end({
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   /**

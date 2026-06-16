@@ -8,6 +8,7 @@ import {
   type notificationSettingsSchema,
   type projectSettingsSchema,
   type providerCustomConfigEntrySchema,
+  type subscriptionProfileSchema,
   type taskSettingsSchema,
   type terminalSettingsSchema,
   type themeSchema,
@@ -22,6 +23,7 @@ export type TerminalSettings = z.infer<typeof terminalSettingsSchema>;
 export type Theme = z.infer<typeof themeSchema>;
 
 export type InterfaceSettings = z.infer<typeof interfaceSettingsSchema>;
+export type SubscriptionProfile = z.infer<typeof subscriptionProfileSchema>;
 export type ProviderCustomConfig = z.infer<typeof providerCustomConfigEntrySchema>;
 export type ProviderCustomConfigs = Record<string, ProviderCustomConfig>;
 export type ChangesViewMode = z.infer<typeof changesViewModeSchema>;

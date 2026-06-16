@@ -14,6 +14,7 @@ import { logLocalPtySpawnWarnings, resolveLocalPtySpawn } from '@main/core/pty/p
 import { killTmuxSession, makeTmuxSessionName } from '@main/core/pty/tmux-session-name';
 import { providerOverrideSettings } from '@main/core/settings/provider-settings-service';
 import { appSettingsService } from '@main/core/settings/settings-service';
+import { subscriptionService } from '@main/core/subscriptions/subscription-service';
 import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
@@ -113,6 +114,8 @@ export class LocalConversationProvider implements ConversationProvider {
       providerId: conversation.providerId,
       providerConfig,
       autoApprove: conversation.autoApprove,
+      model: conversation.model,
+      reasoningEffort: conversation.reasoningEffort,
       // Resume by the real CLI session id once captured; the tondash conversation
       // id is not reliably persisted under by the CLI (see provider-session-id).
       sessionId:
@@ -132,6 +135,10 @@ export class LocalConversationProvider implements ConversationProvider {
     const providerEnv = resolveProviderEnv(providerConfig, {
       providerId: conversation.providerId,
       autoApprove: conversation.autoApprove,
+      extraEnv: await subscriptionService.resolveEnv(
+        conversation.subscriptionId,
+        conversation.providerId
+      ),
     });
 
     const tmuxSessionName = this.tmux ? makeTmuxSessionName(sessionId) : undefined;

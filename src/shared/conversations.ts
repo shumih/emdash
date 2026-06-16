@@ -9,6 +9,12 @@ export type Conversation = {
   lastInteractedAt: string | null;
   resume?: boolean;
   autoApprove?: boolean;
+  /** Model passed to the agent CLI at spawn (provider-specific value); unset = CLI default. */
+  model?: string;
+  /** Reasoning effort passed to the agent CLI at spawn; unset = CLI default. */
+  reasoningEffort?: string;
+  /** Subscription (account) profile id whose token is injected at spawn; unset = default login. */
+  subscriptionId?: string;
   isInitialConversation: boolean | null;
   /**
    * The real session id chosen by the agent CLI (e.g. Claude Code), captured at
@@ -30,6 +36,15 @@ export type RenameConversationParams = {
 export type ForkConversationParams = {
   conversationId: string;
   title: string;
+  /**
+   * Model for the forked session: undefined inherits the source
+   * conversation's value, null clears it to the provider default.
+   */
+  model?: string | null;
+  /** Reasoning effort for the fork; same undefined/null semantics as `model`. */
+  reasoningEffort?: string | null;
+  /** Subscription profile for the fork; same undefined/null semantics as `model`. */
+  subscriptionId?: string | null;
 };
 
 /**
@@ -51,6 +66,12 @@ export type CreateConversationParams = {
   provider: AgentProviderId;
   title: string;
   autoApprove?: boolean;
+  /** Provider-specific model value for the CLI's model flag; unset = CLI default. */
+  model?: string;
+  /** Provider-specific reasoning effort value; unset = CLI default. */
+  reasoningEffort?: string;
+  /** Subscription (account) profile id whose token is injected at spawn; unset = default login. */
+  subscriptionId?: string;
   isInitialConversation?: boolean;
   initialSize?: { cols: number; rows: number };
   initialPrompt?: string;

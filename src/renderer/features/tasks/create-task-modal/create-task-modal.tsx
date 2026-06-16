@@ -1,9 +1,10 @@
 import { ChevronRight, FolderOpen } from 'lucide-react';
 import { observer } from 'mobx-react-lite';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   getProjectManagerStore,
+  getProjectSettingsStore,
   getRepositoryStore,
   mountedProjectData,
 } from '@renderer/features/projects/stores/project-selectors';
@@ -29,7 +30,6 @@ import {
   DialogTitle,
 } from '@renderer/lib/ui/dialog';
 import { Switch } from '@renderer/lib/ui/switch';
-import { ToggleGroup, ToggleGroupItem } from '@renderer/lib/ui/toggle-group';
 import { getPrNumber, isForkPr, type PullRequest } from '@shared/pull-requests';
 import {
   resolveBranchLikeTaskStrategy,
@@ -41,6 +41,7 @@ import { FromPrContent } from './from-pr-content';
 import { FromSharedLinkContent } from './from-shared-link-content';
 import { useInitialConversationState } from './initial-conversation-section';
 import { hasInitialIssueContext, upsertInitialIssueContext } from './initial-conversation-text';
+import { TaskSourceField, type TaskSource } from './task-source-field';
 import { useFromBranchMode } from './use-from-branch-mode';
 import { useFromIssueMode } from './use-from-issue-mode';
 import { useFromPullRequestMode } from './use-from-pull-request-mode';
@@ -50,12 +51,10 @@ type CreateTaskStrategy = 'from-branch' | 'from-issue' | 'from-pull-request' | '
 
 export const CreateTaskModal = observer(function CreateTaskModal({
   projectId,
-  strategy = 'from-branch',
   initialPR,
   onClose,
 }: BaseModalProps & {
   projectId?: string;
-  strategy?: CreateTaskStrategy;
   initialPR?: PullRequest;
 }) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | undefined>(() => {
@@ -74,7 +73,9 @@ export const CreateTaskModal = observer(function CreateTaskModal({
         .find((p) => p.state === 'mounted')?.data?.id
     );
   });
-  const [selectedStrategy, setSelectedStrategy] = useState<CreateTaskStrategy>(strategy);
+  const [source, setSource] = useState<TaskSource | null>(() =>
+    initialPR ? { kind: 'pull-request', pr: initialPR } : null
+  );
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [useBYOI, setUseBYOI] = useState(false);
@@ -82,7 +83,19 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   const projectData = selectedProjectId
     ? mountedProjectData(getProjectManagerStore().projects.get(selectedProjectId))
     : null;
-  const initialConversation = useInitialConversationState(selectedProjectId);
+  // Project's default subscription (account). Reading `.settings` here is
+  // load-bearing: it demand-loads the MobX settings Resource and re-renders this
+  // (observer) modal when it resolves — keep CreateTaskModal an `observer`.
+  // `undefined` = not loaded yet; `null` = loaded, no default configured.
+  const projectSettings = selectedProjectId
+    ? getProjectSettingsStore(selectedProjectId)?.settings
+    : undefined;
+  const projectDefaultSubscriptionId =
+    projectSettings == null ? undefined : (projectSettings.defaultSubscriptionId ?? null);
+  const initialConversation = useInitialConversationState(
+    selectedProjectId,
+    projectDefaultSubscriptionId
+  );
   const autoApproveDefaults = useAgentAutoApproveDefaults();
   const taskSettings = useTaskSettings();
 
@@ -90,7 +103,9 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   useEffect(() => {
     initialConversation.setProvider(null);
     initialConversation.setPrompt('');
-    // setProvider and setPrompt are stable useState setters
+    // setProvider and setPrompt are stable useState setters. setProvider also
+    // resets the account override to undefined, so the picker re-follows the new
+    // project's default (derived in useInitialConversationState).
     // oxlint-disable-next-line react/exhaustive-deps
   }, [selectedProjectId]);
 
@@ -111,9 +126,70 @@ export const CreateTaskModal = observer(function CreateTaskModal({
   const fromBranch = useFromBranchMode(selectedProjectId, defaultBranch, isUnborn, currentBranch);
   const fromIssue = useFromIssueMode(selectedProjectId, defaultBranch, isUnborn, currentBranch);
   const fromPR = useFromPullRequestMode(selectedProjectId, defaultBranch, isUnborn, initialPR);
-  // Shares the same branch picker / task name state as From Branch — switching
-  // tabs preserves the user's choices and avoids a duplicate generateTaskName RPC.
+  // Shares the same branch picker / task name state as From Branch — selecting
+  // and clearing a source preserves the user's choices and avoids a duplicate
+  // generateTaskName RPC.
   const fromSharedLink = useFromSharedLinkMode(fromBranch);
+
+  // The mode is derived from what the user picked in the source field; there
+  // is no manual tab selection anymore.
+  const selectedStrategy: CreateTaskStrategy =
+    source?.kind === 'issue'
+      ? 'from-issue'
+      : source?.kind === 'pull-request'
+        ? 'from-pull-request'
+        : source?.kind === 'shared-link'
+          ? 'from-shared-link'
+          : 'from-branch';
+
+  const [prevSourceProjectId, setPrevSourceProjectId] = useState(selectedProjectId);
+  if (selectedProjectId !== prevSourceProjectId) {
+    setPrevSourceProjectId(selectedProjectId);
+    setSource(null);
+  }
+
+  const issueContextRequestId = useRef(0);
+  const [isAddingIssueContext, setIsAddingIssueContext] = useState(false);
+
+  const handleSourceChange = useCallback(
+    (next: TaskSource | null) => {
+      setSource(next);
+      fromIssue.setLinkedIssue(next?.kind === 'issue' ? next.issue : null);
+      fromPR.setLinkedPR(next?.kind === 'pull-request' ? next.pr : null);
+      fromSharedLink.setShareLink(next?.kind === 'shared-link' ? next.raw : '');
+
+      const requestId = ++issueContextRequestId.current;
+      const issue = next?.kind === 'issue' ? next.issue : null;
+      if (!issue || !taskSettings.includeIssueContextByDefault) {
+        setIsAddingIssueContext(false);
+        return;
+      }
+      const action = buildLinkedIssueContextAction(issue);
+      if (!action) {
+        setIsAddingIssueContext(false);
+        return;
+      }
+      setIsAddingIssueContext(true);
+      void resolveContextActionText({ action, linkedIssue: issue, projectId: selectedProjectId })
+        .then((issueContext) => {
+          if (requestId !== issueContextRequestId.current) return;
+          initialConversation.setPrompt((current) =>
+            upsertInitialIssueContext(current, issueContext)
+          );
+        })
+        .finally(() => {
+          if (requestId === issueContextRequestId.current) setIsAddingIssueContext(false);
+        });
+    },
+    [
+      fromIssue,
+      fromPR,
+      fromSharedLink,
+      taskSettings.includeIssueContextByDefault,
+      selectedProjectId,
+      initialConversation,
+    ]
+  );
 
   const activeMode = {
     'from-branch': fromBranch,
@@ -121,8 +197,7 @@ export const CreateTaskModal = observer(function CreateTaskModal({
     'from-pull-request': fromPR,
     'from-shared-link': fromSharedLink,
   }[selectedStrategy];
-  const fromPrUnavailable = selectedStrategy === 'from-pull-request' && !pullRequestRepositoryUrl;
-  const canCreate = !!selectedProjectId && activeMode.isValid && !fromPrUnavailable && !isCreating;
+  const canCreate = !!selectedProjectId && activeMode.isValid && !isCreating;
 
   const handleCreateTask = useCallback(async () => {
     if (!selectedProjectId) return;
@@ -160,6 +235,9 @@ export const CreateTaskModal = observer(function CreateTaskModal({
             title: nextProviderConversationTitle([]),
             initialPrompt: initialPrompt.trim() || undefined,
             autoApprove: autoApproveDefaults.getDefault(initialConversation.provider),
+            model: initialConversation.model ?? undefined,
+            reasoningEffort: initialConversation.reasoningEffort ?? undefined,
+            subscriptionId: initialConversation.subscriptionId ?? undefined,
           }
         : undefined;
 
@@ -320,87 +398,62 @@ export const CreateTaskModal = observer(function CreateTaskModal({
         <ChevronRight className="size-3.5 text-foreground-passive" />
         <DialogTitle>Create Task</DialogTitle>
       </DialogHeader>
-      <div className="flex shrink-0 flex-col gap-4 px-6 pb-4">
-        <ToggleGroup
-          className="w-full"
-          value={[selectedStrategy]}
-          onValueChange={([value]) => {
-            if (value) {
-              setSelectedStrategy(value as CreateTaskStrategy);
-            }
-          }}
-        >
-          <ToggleGroupItem className="flex-1" value="from-branch">
-            From Branch
-          </ToggleGroupItem>
-          <ToggleGroupItem className="flex-1" value="from-issue">
-            From Issue
-          </ToggleGroupItem>
-          <ToggleGroupItem className="flex-1" value="from-pull-request">
-            From Pull Request
-          </ToggleGroupItem>
-          <ToggleGroupItem className="flex-1" value="from-shared-link">
-            From Shared Link
-          </ToggleGroupItem>
-        </ToggleGroup>
-        {isWorkspaceProviderEnabled &&
-          selectedStrategy !== 'from-shared-link' && (
-            // BYOI workspaces don't expose a local cwd for the share importer to
-            // write into, so we hide the toggle on the From Shared Link tab.
-            <div className="flex items-center gap-2">
-              <Switch size="sm" checked={useBYOI} onCheckedChange={setUseBYOI} />
-              <span className="text-muted-foreground text-sm">Run on own infrastructure</span>
-            </div>
-          )}
-      </div>
+      {isWorkspaceProviderEnabled &&
+        selectedStrategy !== 'from-shared-link' && (
+          // BYOI workspaces don't expose a local cwd for the share importer to
+          // write into, so we hide the toggle when a shared session is selected.
+          <div className="flex shrink-0 items-center gap-2 px-6 pb-4">
+            <Switch size="sm" checked={useBYOI} onCheckedChange={setUseBYOI} />
+            <span className="text-muted-foreground text-sm">Run on own infrastructure</span>
+          </div>
+        )}
       <DialogContentArea>
-        <AnimatedHeight onAnimatingChange={setIsTransitioning}>
-          {selectedStrategy === 'from-branch' && (
-            <FromBranchContent
-              state={fromBranch}
-              projectId={selectedProjectId}
-              currentBranch={currentBranch}
-              isUnborn={isUnborn}
-              initialConversation={initialConversation}
-            />
-          )}
-          {selectedStrategy === 'from-issue' && (
-            <FromIssueContent
-              state={fromIssue}
-              projectId={selectedProjectId}
-              currentBranch={currentBranch}
-              repositoryUrl={issueRepositoryUrl}
-              projectPath={projectData?.path}
-              disabled={isTransitioning}
-              isUnborn={isUnborn}
-              initialConversation={initialConversation}
-            />
-          )}
-          {selectedStrategy === 'from-pull-request' && (
-            <div className="flex flex-col gap-3">
-              {!pullRequestRepositoryUrl && (
-                <p className="text-muted-foreground text-sm">
-                  Pull requests are currently available only for configured GitHub remotes.
-                </p>
-              )}
-              <FromPrContent
-                state={fromPR}
+        <div className="flex flex-col gap-4">
+          <TaskSourceField
+            value={source}
+            onValueChange={handleSourceChange}
+            projectId={selectedProjectId}
+            issueRepositoryUrl={issueRepositoryUrl}
+            pullRequestRepositoryUrl={pullRequestRepositoryUrl}
+            projectPath={projectData?.path}
+          />
+          <AnimatedHeight onAnimatingChange={setIsTransitioning}>
+            {selectedStrategy === 'from-branch' && (
+              <FromBranchContent
+                state={fromBranch}
                 projectId={selectedProjectId}
-                repositoryUrl={pullRequestRepositoryUrl}
-                disabled={isTransitioning || fromPrUnavailable}
+                currentBranch={currentBranch}
+                isUnborn={isUnborn}
                 initialConversation={initialConversation}
               />
-            </div>
-          )}
-          {selectedStrategy === 'from-shared-link' && (
-            <FromSharedLinkContent
-              state={fromSharedLink}
-              projectId={selectedProjectId}
-              currentBranch={currentBranch}
-              isUnborn={isUnborn}
-            />
-          )}
-        </AnimatedHeight>
+            )}
+            {selectedStrategy === 'from-issue' && (
+              <FromIssueContent
+                state={fromIssue}
+                projectId={selectedProjectId}
+                currentBranch={currentBranch}
+                isUnborn={isUnborn}
+                initialConversation={initialConversation}
+                issueActionPending={isAddingIssueContext}
+              />
+            )}
+            {selectedStrategy === 'from-pull-request' && (
+              <FromPrContent
+                state={fromPR}
+                disabled={isTransitioning}
+                initialConversation={initialConversation}
+              />
+            )}
+            {selectedStrategy === 'from-shared-link' && (
+              <FromSharedLinkContent
+                state={fromSharedLink}
+                projectId={selectedProjectId}
+                currentBranch={currentBranch}
+                isUnborn={isUnborn}
+              />
+            )}
+          </AnimatedHeight>
+        </div>
       </DialogContentArea>
       <DialogFooter>
         <ConfirmButton size="sm" onClick={handleCreateTask} disabled={!canCreate}>

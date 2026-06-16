@@ -72,6 +72,8 @@ export const providerCustomConfigEntrySchema = z.object({
   initialPromptFlag: z.string().optional(),
   sessionIdFlag: z.string().optional(),
   sessionIdOnResumeOnly: z.boolean().optional(),
+  modelFlag: z.string().optional(),
+  reasoningEffortFlag: z.string().optional(),
   extraArgs: z.string().optional(),
   env: z.record(z.string(), z.string()).optional(),
 });
@@ -89,6 +91,8 @@ export const providerConfigDefaults = Object.fromEntries(
       ...(p.defaultArgs ? { defaultArgs: p.defaultArgs } : {}),
       ...(p.sessionIdFlag ? { sessionIdFlag: p.sessionIdFlag } : {}),
       ...(p.sessionIdOnResumeOnly ? { sessionIdOnResumeOnly: p.sessionIdOnResumeOnly } : {}),
+      ...(p.modelFlag ? { modelFlag: p.modelFlag } : {}),
+      ...(p.reasoningEffortFlag ? { reasoningEffortFlag: p.reasoningEffortFlag } : {}),
     },
   ])
 );
@@ -119,6 +123,20 @@ export const openInSettingsSchema = z.object({
   hidden: z.array(openInAppIdSchema),
 });
 
+/**
+ * Metadata for a CLI-agent subscription (account) profile. The OAuth token
+ * itself never lives here — it is stored encrypted in the appSecrets table
+ * under a key derived from the profile id.
+ */
+export const subscriptionProfileSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+
+export const subscriptionProfilesSettingsSchema = z.object({
+  profiles: z.array(subscriptionProfileSchema),
+});
+
 export const APP_SETTINGS_SCHEMA_MAP = {
   localProject: localProjectSettingsSchema,
   project: projectSettingsSchema,
@@ -135,6 +153,7 @@ export const APP_SETTINGS_SCHEMA_MAP = {
   resourceMonitor: resourceMonitorSettingsSchema,
   changesViewMode: changesViewModeSchema,
   sessionSharing: sessionSharingSettingsSchema,
+  subscriptionProfiles: subscriptionProfilesSettingsSchema,
 } as const;
 
 export const appSettingsSchema = z.object({
@@ -153,4 +172,5 @@ export const appSettingsSchema = z.object({
   resourceMonitor: resourceMonitorSettingsSchema,
   changesViewMode: changesViewModeSchema,
   sessionSharing: sessionSharingSettingsSchema,
+  subscriptionProfiles: subscriptionProfilesSettingsSchema,
 });

@@ -29,6 +29,7 @@ import { providerSettingsController } from './core/settings/provider-settings-co
 import { sharedSessionsController } from './core/shared-sessions/controller';
 import { skillsController } from './core/skills/controller';
 import { sshController } from './core/ssh/controller';
+import { subscriptionsController } from './core/subscriptions/controller';
 import { taskController } from './core/tasks/controller';
 import { telemetryController } from './core/telemetry/controller';
 import { terminalsController } from './core/terminals/controller';
@@ -62,6 +63,7 @@ export const rpcRouter = createRPCRouter({
   promptLibrary: promptLibraryController,
   skills: skillsController,
   ssh: sshController,
+  subscriptions: subscriptionsController,
   projects: projectController,
   tasks: taskController,
   conversations: conversationController,

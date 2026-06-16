@@ -9,8 +9,11 @@ import { resolveSshCommand } from '@main/core/pty/spawn-utils';
 import { openSsh2Pty } from '@main/core/pty/ssh2-pty';
 import { killTmuxSession, makeTmuxSessionName } from '@main/core/pty/tmux-session-name';
 import { providerOverrideSettings } from '@main/core/settings/provider-settings-service';
+import { sshConnectionManager } from '@main/core/ssh/lifecycle/production-ssh-connection-manager';
 import { resolveRemoteHome } from '@main/core/ssh/lifecycle/remote-shell-profile';
 import type { SshClientProxy } from '@main/core/ssh/lifecycle/ssh-client-proxy';
+import type { SshConnectionManagerEvent } from '@main/core/ssh/lifecycle/ssh-connection-manager';
+import { subscriptionService } from '@main/core/subscriptions/subscription-service';
 import { events } from '@main/lib/events';
 import { log } from '@main/lib/logger';
 import { telemetryService } from '@main/lib/telemetry';
@@ -28,10 +31,16 @@ const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 const MAX_RESPAWNS = 2;
 
+type TrackedSession = {
+  conversation: Conversation;
+  initialSize: { cols: number; rows: number };
+};
+
 export class SshConversationProvider implements ConversationProvider {
   private sessions = new Map<string, Pty>();
   private knownSessionIds = new Set<string>();
   private respawnCounts = new Map<string, number>();
+  private trackedSessions = new Map<string, TrackedSession>();
   private readonly projectId: string;
   private readonly taskPath: string;
   private readonly taskId: string;
@@ -41,6 +50,8 @@ export class SshConversationProvider implements ConversationProvider {
   private readonly shellSetup?: string;
   private readonly ctx: IExecutionContext;
   private readonly proxy: SshClientProxy;
+  private readonly connectionId: string;
+  private readonly _handleReconnect: (evt: SshConnectionManagerEvent) => void;
 
   constructor({
     projectId,
@@ -52,6 +63,7 @@ export class SshConversationProvider implements ConversationProvider {
     shellSetup,
     ctx,
     proxy,
+    connectionId,
   }: {
     projectId: string;
     taskPath: string;
@@ -62,6 +74,7 @@ export class SshConversationProvider implements ConversationProvider {
     shellSetup?: string;
     ctx: IExecutionContext;
     proxy: SshClientProxy;
+    connectionId: string;
   }) {
     this.projectId = projectId;
     this.taskPath = taskPath;
@@ -72,6 +85,19 @@ export class SshConversationProvider implements ConversationProvider {
     this.shellSetup = shellSetup;
     this.ctx = ctx;
     this.proxy = proxy;
+    this.connectionId = connectionId;
+    this._handleReconnect = (evt: SshConnectionManagerEvent) => {
+      if (evt.type === 'reconnected' && evt.connectionId === this.connectionId) {
+        this.rehydrate().catch((e: unknown) => {
+          log.error('SshConversationProvider: rehydrate failed after reconnect', {
+            taskId: this.taskId,
+            connectionId: this.connectionId,
+            error: String(e),
+          });
+        });
+      }
+    };
+    sshConnectionManager.on('connection-event', this._handleReconnect);
   }
 
   async startSession(
@@ -86,6 +112,7 @@ export class SshConversationProvider implements ConversationProvider {
       conversation.id
     );
     this.knownSessionIds.add(sessionId);
+    this.trackedSessions.set(sessionId, { conversation, initialSize });
 
     if (this.sessions.has(sessionId)) return;
 
@@ -101,6 +128,8 @@ export class SshConversationProvider implements ConversationProvider {
       providerId: conversation.providerId,
       providerConfig,
       autoApprove: conversation.autoApprove,
+      model: conversation.model,
+      reasoningEffort: conversation.reasoningEffort,
       // Resume by the real CLI session id once captured; the tondash conversation
       // id is not reliably persisted under by the CLI (see provider-session-id).
       sessionId:
@@ -118,6 +147,10 @@ export class SshConversationProvider implements ConversationProvider {
     const providerEnv = resolveProviderEnv(providerConfig, {
       providerId: conversation.providerId,
       autoApprove: conversation.autoApprove,
+      extraEnv: await subscriptionService.resolveEnv(
+        conversation.subscriptionId,
+        conversation.providerId
+      ),
     });
 
     const tmuxSessionName = this.tmux ? makeTmuxSessionName(sessionId) : undefined;
@@ -191,7 +224,7 @@ export class SshConversationProvider implements ConversationProvider {
 
     pty.onExit(({ exitCode }) => {
       ptySessionRegistry.unregister(sessionId);
-      const shouldRespawn = this.sessions.has(sessionId);
+      const wasActive = this.sessions.has(sessionId);
       this.sessions.delete(sessionId);
       events.emit(agentSessionExitedChannel, {
         sessionId,
@@ -200,6 +233,10 @@ export class SshConversationProvider implements ConversationProvider {
         taskId: conversation.taskId,
         exitCode,
       });
+      // When SSH is disconnected, the channel close is just collateral damage —
+      // don't respawn (it would fail with SSH down). The reconnect listener
+      // will call rehydrate() once SSH is back to bring this session up again.
+      const shouldRespawn = wasActive && this.proxy.isConnected;
       if (shouldRespawn && !this.tmux) {
         const count = (this.respawnCounts.get(sessionId) ?? 0) + 1;
         this.respawnCounts.set(sessionId, count);
@@ -258,6 +295,7 @@ export class SshConversationProvider implements ConversationProvider {
   async stopSession(conversationId: string): Promise<void> {
     const sessionId = makePtySessionId(this.projectId, this.taskId, conversationId);
     this.knownSessionIds.delete(sessionId);
+    this.trackedSessions.delete(sessionId);
     const pty = this.sessions.get(sessionId);
     if (pty) {
       try {
@@ -273,13 +311,36 @@ export class SshConversationProvider implements ConversationProvider {
     }
   }
 
+  /**
+   * Re-open SSH PTYs for tracked sessions that are no longer alive (e.g. after
+   * an SSH reconnect closed all channels). Uses isResuming=true so the agent
+   * picks up its previous conversation rather than starting fresh.
+   */
+  async rehydrate(): Promise<void> {
+    const entries = Array.from(this.trackedSessions.entries());
+    await Promise.all(
+      entries.map(async ([sessionId, { conversation, initialSize }]) => {
+        if (this.sessions.has(sessionId)) return;
+        this.respawnCounts.delete(sessionId);
+        await this.startSession(conversation, initialSize, true).catch((e) => {
+          log.error('SshConversationProvider: rehydrate failed', {
+            conversationId: conversation.id,
+            error: String(e),
+          });
+        });
+      })
+    );
+  }
+
   async destroyAll(): Promise<void> {
+    sshConnectionManager.off('connection-event', this._handleReconnect);
     const sessionIds = Array.from(this.knownSessionIds);
     await this.detachAll();
     if (this.tmux) {
       await Promise.all(sessionIds.map((id) => killTmuxSession(this.ctx, makeTmuxSessionName(id))));
     }
     this.knownSessionIds.clear();
+    this.trackedSessions.clear();
   }
 
   async detachAll(): Promise<void> {

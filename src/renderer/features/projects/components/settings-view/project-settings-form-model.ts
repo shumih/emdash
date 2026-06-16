@@ -20,6 +20,8 @@ export type FormState = {
   pushRemote: string;
   provisionCommand: string;
   terminateCommand: string;
+  /** Default subscription (account) profile id; '' = machine default login. */
+  defaultSubscriptionId: string;
 };
 
 export type FormUpdate = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
@@ -61,6 +63,7 @@ export function settingsToForm(
     pushRemote: s.pushRemote ?? '',
     provisionCommand: s.workspaceProvider?.provisionCommand ?? '',
     terminateCommand: s.workspaceProvider?.terminateCommand ?? '',
+    defaultSubscriptionId: s.defaultSubscriptionId ?? '',
   };
 }
 
@@ -104,6 +107,7 @@ export function formToSettings(f: FormState): ProjectSettings {
             terminateCommand,
           }
         : undefined,
+    defaultSubscriptionId: blankToUndefined(f.defaultSubscriptionId),
   };
 }
 

@@ -68,6 +68,9 @@ export const SETTINGS_DEFAULTS = {
     enabled: false,
     endpointUrl: '',
   },
+  subscriptionProfiles: {
+    profiles: [],
+  },
 } satisfies SettingsDefaultsMap;
 
 export function getDefaultForKey<K extends AppSettingsKey>(key: K): AppSettings[K] {

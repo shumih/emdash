@@ -14,6 +14,7 @@ import RepositorySettingsCard from './RepositorySettingsCard';
 import ResourceMonitorSettingsCard from './ResourceMonitorSettingsCard';
 import SessionSharingSettingsCard from './SessionSharingSettingsCard';
 import { SshConnectionsSettingsCard } from './SshConnectionsSettingsCard';
+import { SubscriptionsSettingsCard } from './SubscriptionsSettingsCard';
 import {
   AutoGenerateTaskNamesRow,
   AutoTrustWorktreesRow,
@@ -124,6 +125,7 @@ export function SettingsPage({
             </div>
           ),
         },
+        { title: 'Subscriptions', component: <SubscriptionsSettingsCard /> },
       ],
     },
     integrations: {

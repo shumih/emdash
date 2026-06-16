@@ -54,6 +54,13 @@ export const baseProjectSettingsSchema = z.object({
   baseRemote: z.string().optional(),
   pushRemote: z.string().optional(),
   tmux: z.boolean().optional(),
+  /**
+   * Subscription (account) profile id used by default for new conversations in
+   * this project. Per-machine (base, not shareable) — references an app-level
+   * profile id that only makes sense on this machine. Empty/undefined = the
+   * machine's default login.
+   */
+  defaultSubscriptionId: z.string().optional(),
   workspaceProvider: z
     .object({
       type: z.literal('script'),

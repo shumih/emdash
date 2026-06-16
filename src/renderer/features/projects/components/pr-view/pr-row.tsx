@@ -57,9 +57,7 @@ export const PrRow = memo(function PrRow({
         <Button
           variant="outline"
           size="sm"
-          onClick={() =>
-            showCreateTaskModal({ projectId, strategy: 'from-pull-request', initialPR: pr })
-          }
+          onClick={() => showCreateTaskModal({ projectId, initialPR: pr })}
         >
           <ScanSearch className="size-3.5" />
           Review in Task

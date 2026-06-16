@@ -3,6 +3,7 @@ import { rpc } from '@renderer/lib/ipc';
 import { PtySession } from '@renderer/lib/pty/pty-session';
 import type { IDisposable } from '@renderer/lib/stores/lifecycle';
 import { Resource } from '@renderer/lib/stores/resource';
+import { traceUserAction } from '@renderer/utils/user-action-trace';
 import { makePtySessionId } from '@shared/ptySessionId';
 import { type CreateTerminalParams, type Terminal } from '@shared/terminals';
 import { nextTerminalName } from './terminal-tabs';
@@ -74,6 +75,12 @@ export class TerminalManagerStore implements IDisposable {
   }
 
   async createTerminal(params: CreateTerminalParams): Promise<Terminal> {
+    const span = traceUserAction('create-terminal', {
+      projectId: params.projectId,
+      taskId: params.taskId,
+      terminalId: params.id,
+    });
+
     const optimistic: Terminal = {
       id: params.id,
       projectId: params.projectId,
@@ -88,21 +95,28 @@ export class TerminalManagerStore implements IDisposable {
         new PtySession(makePtySessionId(params.projectId, params.taskId, params.id))
       );
     });
+    span.step('optimistic-insert');
 
     try {
       const terminal = await rpc.terminals.createTerminal(params);
+      span.step('rpc-create-terminal');
       runInAction(() => {
         const store = this.terminals.get(params.id);
         if (store) {
           Object.assign(store.data, terminal);
         }
       });
+      span.end({ status: 'ok' });
       return terminal;
     } catch (err) {
       runInAction(() => {
         this.sessions.get(params.id)?.dispose();
         this.sessions.delete(params.id);
         this.terminals.delete(params.id);
+      });
+      span.end({
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
       });
       throw err;
     }

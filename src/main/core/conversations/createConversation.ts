@@ -18,10 +18,13 @@ export async function createConversation(params: CreateConversationParams): Prom
     .where(eq(conversations.taskId, params.taskId))
     .limit(1);
 
-  const config =
-    params.autoApprove === undefined
-      ? undefined
-      : JSON.stringify({ autoApprove: params.autoApprove });
+  const configFields = {
+    ...(params.autoApprove !== undefined ? { autoApprove: params.autoApprove } : {}),
+    ...(params.model ? { model: params.model } : {}),
+    ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
+    ...(params.subscriptionId ? { subscriptionId: params.subscriptionId } : {}),
+  };
+  const config = Object.keys(configFields).length > 0 ? JSON.stringify(configFields) : undefined;
 
   const [row] = await db
     .insert(conversations)

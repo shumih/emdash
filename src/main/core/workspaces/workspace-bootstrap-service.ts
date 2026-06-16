@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { eq, sql } from 'drizzle-orm';
 import { db as appDb, type AppDb } from '@main/db/client';
 import { tasks, workspaces } from '@main/db/schema';
+import { traceUserAction } from '@main/lib/user-action-trace';
 import type { WorkspaceResolution, WorkspaceType } from '@shared/workspaces';
 import type { WorktreeBootstrapOps } from '../projects/worktrees/worktree-service';
 import { mapWorktreeErrorToProvisionError } from '../tasks/provision-task-error';
@@ -23,77 +24,111 @@ export class WorkspaceBootstrapService {
    * Handles legacy workspace ID migration, path existence checks, and branch discovery.
    */
   async resolveBootstrap(taskId: string, ctx: WorktreeContext): Promise<WorkspaceResolution> {
-    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId));
-    if (!taskRow) throw new Error(`Task not found: ${taskId}`);
+    const span = traceUserAction('main:resolve-bootstrap', {
+      taskId,
+      isSsh: Boolean(ctx.connectionId),
+    });
+    try {
+      const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId));
+      if (!taskRow) {
+        span.end({ status: 'error', failed_step: 'load-task' });
+        throw new Error(`Task not found: ${taskId}`);
+      }
+      span.step('load-task');
 
-    const rawWorkspaceId = taskRow.workspaceId;
-    let workspaceId: string;
+      const rawWorkspaceId = taskRow.workspaceId;
+      let workspaceId: string;
 
-    if (!rawWorkspaceId || this._isLegacyWorkspaceId(rawWorkspaceId)) {
-      workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
-    } else {
-      workspaceId = rawWorkspaceId;
-    }
+      if (!rawWorkspaceId || this._isLegacyWorkspaceId(rawWorkspaceId)) {
+        workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
+        span.step('provision-fresh-workspace');
+      } else {
+        workspaceId = rawWorkspaceId;
+      }
 
-    let [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+      let [workspace] = await this.db
+        .select()
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId));
+      span.step('load-workspace');
 
-    // Dangling reference: the task points at a workspace row that no longer
-    // exists (e.g. the workspace was deleted out from under it). Recover by
-    // provisioning a fresh workspace instead of failing to open the task.
-    if (!workspace) {
-      workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
-      [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
-    }
+      // Dangling reference: the task points at a workspace row that no longer
+      // exists (e.g. the workspace was deleted out from under it). Recover by
+      // provisioning a fresh workspace instead of failing to open the task.
+      if (!workspace) {
+        workspaceId = await this._provisionFreshWorkspace(taskId, taskRow, rawWorkspaceId, ctx);
+        [workspace] = await this.db.select().from(workspaces).where(eq(workspaces.id, workspaceId));
+        span.step('reprovision-dangling-workspace');
+      }
 
-    if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
+      if (!workspace) {
+        span.end({ status: 'error', failed_step: 'workspace-not-found' });
+        throw new Error(`Workspace not found: ${workspaceId}`);
+      }
 
-    if (workspace.type === 'byoi') {
-      return { kind: 'ready' };
-    }
-
-    const taskBranch = taskRow.taskBranch ?? null;
-    const { worktreeService } = ctx;
-
-    if (workspace.path) {
-      const pathExists = await worktreeService.existsAtAbsolutePath(workspace.path);
-      if (pathExists) {
+      if (workspace.type === 'byoi') {
+        span.end({ status: 'ready', kind: 'byoi' });
         return { kind: 'ready' };
       }
 
+      const taskBranch = taskRow.taskBranch ?? null;
+      const { worktreeService } = ctx;
+
+      if (workspace.path) {
+        const pathExists = await worktreeService.existsAtAbsolutePath(workspace.path);
+        span.step('check-path-exists', { exists: pathExists });
+        if (pathExists) {
+          span.end({ status: 'ready', kind: 'path-exists' });
+          return { kind: 'ready' };
+        }
+
+        if (!taskBranch) {
+          span.end({ status: 'path-missing', noBranch: true });
+          return { kind: 'path_missing', previousPath: workspace.path, taskBranch: null };
+        }
+
+        const candidatePath = await worktreeService.findBranchAnywhere(taskBranch);
+        span.step('find-branch-anywhere', { found: Boolean(candidatePath) });
+        if (candidatePath && candidatePath !== workspace.path) {
+          span.end({ status: 'branch-elsewhere' });
+          return {
+            kind: 'branch_elsewhere',
+            taskBranch,
+            candidatePath,
+            previousPath: workspace.path,
+          };
+        }
+
+        span.end({ status: 'path-missing' });
+        return { kind: 'path_missing', previousPath: workspace.path, taskBranch };
+      }
+
       if (!taskBranch) {
-        return { kind: 'path_missing', previousPath: workspace.path, taskBranch: null };
+        span.end({ status: 'needs-create', noBranch: true });
+        return { kind: 'needs_create' };
       }
 
       const candidatePath = await worktreeService.findBranchAnywhere(taskBranch);
-      if (candidatePath && candidatePath !== workspace.path) {
-        return {
-          kind: 'branch_elsewhere',
-          taskBranch,
+      span.step('find-branch-anywhere', { found: Boolean(candidatePath) });
+      if (candidatePath) {
+        await this._persistPathForTask(
+          workspace.id,
+          taskId,
           candidatePath,
-          previousPath: workspace.path,
-        };
+          workspace.type,
+          ctx.connectionId
+        );
+        span.step('persist-path');
+        span.end({ status: 'ready', kind: 'discovered-existing-branch' });
+        return { kind: 'ready' };
       }
 
-      return { kind: 'path_missing', previousPath: workspace.path, taskBranch };
-    }
-
-    if (!taskBranch) {
+      span.end({ status: 'needs-create' });
       return { kind: 'needs_create' };
+    } catch (e) {
+      span.end({ status: 'error', error: e instanceof Error ? e.message : String(e) });
+      throw e;
     }
-
-    const candidatePath = await worktreeService.findBranchAnywhere(taskBranch);
-    if (candidatePath) {
-      await this._persistPathForTask(
-        workspace.id,
-        taskId,
-        candidatePath,
-        workspace.type,
-        ctx.connectionId
-      );
-      return { kind: 'ready' };
-    }
-
-    return { kind: 'needs_create' };
   }
 
   /**

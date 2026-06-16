@@ -1,4 +1,3 @@
-import { Input } from '@renderer/lib/ui/input';
 import { Label } from '@renderer/lib/ui/label';
 import {
   Select,
@@ -25,6 +24,12 @@ interface FromSharedLinkContentProps {
   isUnborn?: boolean;
 }
 
+/**
+ * Shown when the unified source field has a shared-session link. The link
+ * itself lives in the source field; this renders the target provider,
+ * branch, and name fields. The session is imported as the task's first
+ * conversation.
+ */
 export function FromSharedLinkContent({
   state,
   projectId,
@@ -33,19 +38,6 @@ export function FromSharedLinkContent({
 }: FromSharedLinkContentProps) {
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="share-link">Share link or ref</Label>
-        <Input
-          id="share-link"
-          value={state.shareLink}
-          onChange={(e) => state.setShareLink(e.target.value)}
-          placeholder="http://code.d/s/… or a share id"
-          autoFocus
-        />
-        <p className="text-xs text-foreground-passive">
-          The session is imported as this task&apos;s first conversation.
-        </p>
-      </div>
       <div className="flex flex-col gap-1.5">
         <Label>Open as</Label>
         <Select
@@ -63,6 +55,9 @@ export function FromSharedLinkContent({
             ))}
           </SelectContent>
         </Select>
+        <p className="text-xs text-foreground-passive">
+          The session is imported as this task&apos;s first conversation.
+        </p>
       </div>
       <BranchPickerField
         state={state}

@@ -28,6 +28,7 @@ function makeForm(overrides: Partial<FormState> = {}): FormState {
     pushRemote: '',
     provisionCommand: '',
     terminateCommand: '',
+    defaultSubscriptionId: '',
     ...overrides,
   };
 }
@@ -53,6 +54,7 @@ describe('project settings form model', () => {
           provisionCommand: './provision.sh',
           terminateCommand: './terminate.sh',
         },
+        defaultSubscriptionId: 'sub-123',
       },
       'origin',
       [origin, upstream]
@@ -71,7 +73,21 @@ describe('project settings form model', () => {
       pushRemote: 'origin',
       provisionCommand: './provision.sh',
       terminateCommand: './terminate.sh',
+      defaultSubscriptionId: 'sub-123',
     });
+  });
+
+  it('round-trips the default subscription id through form state', () => {
+    expect(
+      settingsToForm({ defaultSubscriptionId: 'sub-9' }, 'origin', [origin]).defaultSubscriptionId
+    ).toBe('sub-9');
+    expect(formToSettings(makeForm({ defaultSubscriptionId: 'sub-9' })).defaultSubscriptionId).toBe(
+      'sub-9'
+    );
+    // Empty selection ("machine default login") drops the field entirely.
+    expect(
+      formToSettings(makeForm({ defaultSubscriptionId: '' })).defaultSubscriptionId
+    ).toBeUndefined();
   });
 
   it('uses the configured remote for object default branch settings', () => {

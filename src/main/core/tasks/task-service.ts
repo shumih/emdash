@@ -9,6 +9,7 @@ import { db } from '@main/db/client';
 import { conversations, tasks, terminals, workspaces } from '@main/db/schema';
 import { HookCore, type Hookable } from '@main/lib/hookable';
 import { log } from '@main/lib/logger';
+import { traceUserAction } from '@main/lib/user-action-trace';
 import { err, ok, type Result } from '@shared/result';
 import type {
   CreateTaskError,
@@ -54,113 +55,161 @@ export class TaskService implements Hookable<TaskCrudHooks> {
   }
 
   async createTask(params: CreateTaskParams): Promise<Result<CreateTaskSuccess, CreateTaskError>> {
-    const result = await createTask(params);
-    if (result.success) this._hooks.callHookBackground('task:created', result.data.task, params);
-    return result;
+    const span = traceUserAction('main:create-task', {
+      projectId: params.projectId,
+      taskId: params.id,
+      strategy: params.strategy.kind,
+    });
+    try {
+      const result = await createTask(params);
+      span.step('create-task-op', { ok: result.success });
+      if (result.success) this._hooks.callHookBackground('task:created', result.data.task, params);
+      span.end({ status: result.success ? 'ok' : 'error' });
+      return result;
+    } catch (err) {
+      span.end({ status: 'error', error: err instanceof Error ? err.message : String(err) });
+      throw err;
+    }
   }
 
   async provision(taskId: string): Promise<Result<ProvisionResult, ProvisionTaskError>> {
-    const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
-    if (!row) throw new Error(`Task not found: ${taskId}`);
+    const span = traceUserAction('main:provision', { taskId });
+    try {
+      const [row] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      if (!row) {
+        span.end({ status: 'error', failed_step: 'load-task', error: 'task-not-found' });
+        throw new Error(`Task not found: ${taskId}`);
+      }
+      span.step('load-task');
 
-    const task = mapTaskRowToTask(row);
-    const project = projectManager.getProject(task.projectId);
-    if (!project) throw new Error(`Project not found: ${task.projectId}`);
+      const task = mapTaskRowToTask(row);
+      const project = projectManager.getProject(task.projectId);
+      if (!project) {
+        span.end({ status: 'error', failed_step: 'get-project', error: 'project-not-found' });
+        throw new Error(`Project not found: ${task.projectId}`);
+      }
 
-    // Idempotency: task is already live — return current state.
-    const existingTask = taskManager.getTask(taskId);
-    if (existingTask) {
-      const pd = taskManager.getPersistData(taskId);
-      const wsId = pd?.workspaceId ?? '';
-      return ok({
-        path: workspaceRegistry.get(wsId)?.path ?? '',
-        workspaceId: wsId,
-        sshConnectionId: pd?.sshConnectionId,
+      // Idempotency: task is already live — return current state.
+      const existingTask = taskManager.getTask(taskId);
+      if (existingTask) {
+        const pd = taskManager.getPersistData(taskId);
+        const wsId = pd?.workspaceId ?? '';
+        span.end({ status: 'idempotent' });
+        return ok({
+          path: workspaceRegistry.get(wsId)?.path ?? '',
+          workspaceId: wsId,
+          sshConnectionId: pd?.sshConnectionId,
+        });
+      }
+
+      // Load existing sessions (empty arrays for brand-new tasks).
+      const [existingTerminals, existingConversations] = await Promise.all([
+        db
+          .select()
+          .from(terminals)
+          .where(eq(terminals.taskId, taskId))
+          .then((rows) => rows.map(mapTerminalRowToTerminal)),
+        db
+          .select()
+          .from(conversations)
+          .where(eq(conversations.taskId, taskId))
+          .then((rows) => rows.map((r) => mapConversationRowToConversation(r, true))),
+      ]);
+      span.step('load-sessions', {
+        terminals: existingTerminals.length,
+        conversations: existingConversations.length,
       });
-    }
 
-    // Load existing sessions (empty arrays for brand-new tasks).
-    const [existingTerminals, existingConversations] = await Promise.all([
-      db
+      if (!row.workspaceId) {
+        span.end({ status: 'error', failed_step: 'workspace-id-missing' });
+        throw new Error(`Task ${taskId} has no workspace — cannot provision`);
+      }
+
+      const workspaceRow = await db
         .select()
-        .from(terminals)
-        .where(eq(terminals.taskId, taskId))
-        .then((rows) => rows.map(mapTerminalRowToTerminal)),
-      db
-        .select()
-        .from(conversations)
-        .where(eq(conversations.taskId, taskId))
-        .then((rows) => rows.map((r) => mapConversationRowToConversation(r, true))),
-    ]);
+        .from(workspaces)
+        .where(eq(workspaces.id, row.workspaceId))
+        .then((r) => r[0]);
 
-    if (!row.workspaceId) throw new Error(`Task ${taskId} has no workspace — cannot provision`);
+      if (!workspaceRow) {
+        span.end({ status: 'error', failed_step: 'load-workspace' });
+        throw new Error(`Workspace ${row.workspaceId} not found for task ${taskId}`);
+      }
+      span.step('load-workspace', { type: workspaceRow.type });
 
-    const workspaceRow = await db
-      .select()
-      .from(workspaces)
-      .where(eq(workspaces.id, row.workspaceId))
-      .then((r) => r[0]);
+      const hint: WorkspaceHint = {
+        id: workspaceRow.id,
+        type: workspaceRow.type,
+        path: workspaceRow.path ?? undefined,
+      };
 
-    if (!workspaceRow) {
-      throw new Error(`Workspace ${row.workspaceId} not found for task ${taskId}`);
-    }
-
-    const hint: WorkspaceHint = {
-      id: workspaceRow.id,
-      type: workspaceRow.type,
-      path: workspaceRow.path ?? undefined,
-    };
-
-    const result = await taskManager.provisionTask(
-      project,
-      task,
-      existingConversations,
-      existingTerminals,
-      hint
-    );
-    if (!result.success) return err(result.error);
-
-    const { persistData } = result.data;
-
-    if (persistData.sshConnectionId) {
-      sshConnectionManager.reportChannelRecovered(persistData.sshConnectionId);
-    }
-
-    const workspacePath = workspaceRegistry.get(persistData.workspaceId)?.path ?? '';
-
-    await db
-      .update(tasks)
-      .set({ lastInteractedAt: sql`CURRENT_TIMESTAMP`, workspaceId: persistData.workspaceId })
-      .where(eq(tasks.id, taskId));
-
-    if (!workspaceRow.path && workspacePath) {
-      const connectionId =
-        project.defaultWorkspaceType.kind === 'ssh'
-          ? project.defaultWorkspaceType.connectionId
-          : undefined;
-      await workspaceBootstrapService.persistPath(
-        workspaceRow.id,
-        workspacePath,
-        workspaceRow.type,
-        connectionId
+      const result = await taskManager.provisionTask(
+        project,
+        task,
+        existingConversations,
+        existingTerminals,
+        hint
       );
-    }
+      span.step('task-manager-provision', {
+        ok: result.success,
+        wsType: workspaceRow.type,
+        nConvs: existingConversations.length,
+        nTerms: existingTerminals.length,
+      });
+      if (!result.success) {
+        span.end({ status: 'error', failed_step: 'task-manager-provision' });
+        return err(result.error);
+      }
 
-    if (workspaceRow.type === 'byoi' && persistData.workspaceProviderData) {
+      const { persistData } = result.data;
+
+      if (persistData.sshConnectionId) {
+        sshConnectionManager.reportChannelRecovered(persistData.sshConnectionId);
+      }
+
+      const workspacePath = workspaceRegistry.get(persistData.workspaceId)?.path ?? '';
+
       await db
-        .update(workspaces)
-        .set({
-          data: JSON.stringify(persistData.workspaceProviderData),
-          updatedAt: sql`CURRENT_TIMESTAMP`,
-        })
-        .where(eq(workspaces.id, workspaceRow.id));
-    }
+        .update(tasks)
+        .set({ lastInteractedAt: sql`CURRENT_TIMESTAMP`, workspaceId: persistData.workspaceId })
+        .where(eq(tasks.id, taskId));
+      span.step('update-task-row');
 
-    return ok({
-      path: workspacePath,
-      workspaceId: persistData.workspaceId,
-      sshConnectionId: persistData.sshConnectionId,
-    });
+      if (!workspaceRow.path && workspacePath) {
+        const connectionId =
+          project.defaultWorkspaceType.kind === 'ssh'
+            ? project.defaultWorkspaceType.connectionId
+            : undefined;
+        await workspaceBootstrapService.persistPath(
+          workspaceRow.id,
+          workspacePath,
+          workspaceRow.type,
+          connectionId
+        );
+        span.step('persist-path');
+      }
+
+      if (workspaceRow.type === 'byoi' && persistData.workspaceProviderData) {
+        await db
+          .update(workspaces)
+          .set({
+            data: JSON.stringify(persistData.workspaceProviderData),
+            updatedAt: sql`CURRENT_TIMESTAMP`,
+          })
+          .where(eq(workspaces.id, workspaceRow.id));
+        span.step('persist-byoi-data');
+      }
+
+      span.end({ status: 'ok', wsType: workspaceRow.type, path: workspacePath ? 'set' : 'empty' });
+      return ok({
+        path: workspacePath,
+        workspaceId: persistData.workspaceId,
+        sshConnectionId: persistData.sshConnectionId,
+      });
+    } catch (e) {
+      span.end({ status: 'error', error: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
   }
 
   async teardown(

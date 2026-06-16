@@ -78,6 +78,28 @@ export type AgentProviderDefinition = {
   sessionNameFlag?: string;
   newConversationFlag?: string;
   sessionIdOnResumeOnly?: boolean;
+  /**
+   * CLI flag to pick the model for a session, e.g. '--model' for Claude Code.
+   * A trailing '=' on the last word makes the value append (`-c model=`).
+   */
+  modelFlag?: string;
+  /**
+   * Curated model values offered in the create-conversation UI. The dropdown
+   * is hidden for providers without a list; `modelFlag` alone still lets a
+   * stored value reach the CLI.
+   */
+  modelOptions?: string[];
+  /** CLI flag for reasoning effort, e.g. '--effort' (Claude Code) or '-c model_reasoning_effort=' (Codex). */
+  reasoningEffortFlag?: string;
+  /** Effort values offered in the UI; dropdown hidden when absent. */
+  reasoningEffortOptions?: string[];
+  /**
+   * Env var that carries a long-lived account token (e.g. from
+   * `claude setup-token`), letting a conversation run under a specific
+   * subscription regardless of the machine's default login. Providers
+   * without it don't get the Account selector.
+   */
+  subscriptionTokenEnvVar?: string;
   defaultArgs?: string[];
   planActivateCommand?: string;
   autoStartCommand?: string;
@@ -105,6 +127,10 @@ export const AGENT_PROVIDERS: AgentProviderDefinition[] = [
     autoApproveFlag: '--dangerously-bypass-approvals-and-sandbox',
     initialPromptFlag: '',
     resumeFlag: 'resume --last',
+    modelFlag: '--model',
+    modelOptions: ['gpt-5.2-codex', 'gpt-5.2', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini'],
+    reasoningEffortFlag: '-c model_reasoning_effort=',
+    reasoningEffortOptions: ['minimal', 'low', 'medium', 'high', 'xhigh'],
     icon: 'openai.svg',
     alt: 'Codex',
     terminalOnly: true,
@@ -125,6 +151,20 @@ export const AGENT_PROVIDERS: AgentProviderDefinition[] = [
     resumeFlag: '--resume',
     sessionIdFlag: '--session-id',
     sessionNameFlag: '--name',
+    modelFlag: '--model',
+    modelOptions: [
+      'fable',
+      'fable[1m]',
+      'opus',
+      'opus[1m]',
+      'sonnet',
+      'sonnet[1m]',
+      'haiku',
+      'opusplan',
+    ],
+    reasoningEffortFlag: '--effort',
+    reasoningEffortOptions: ['low', 'medium', 'high', 'xhigh', 'max'],
+    subscriptionTokenEnvVar: 'CLAUDE_CODE_OAUTH_TOKEN',
     planActivateCommand: '/plan',
     icon: 'claude.svg',
     alt: 'Claude Code',
@@ -180,6 +220,9 @@ export const AGENT_PROVIDERS: AgentProviderDefinition[] = [
     autoApproveFlag: '-f',
     initialPromptFlag: '',
     resumeFlag: '--resume',
+    // Model list changes too often to curate; no modelOptions → no dropdown,
+    // but a value stored on the conversation still reaches the CLI.
+    modelFlag: '--model',
     icon: 'cursor.svg',
     alt: 'Cursor CLI',
     invertInDark: true,

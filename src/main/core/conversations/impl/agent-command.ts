@@ -92,21 +92,24 @@ function parseCliPrefix(value: string | undefined, providerId: AgentProviderId):
   return parsed.words;
 }
 
-function appendSessionId(args: string[], flag: string, sessionId: string): void {
+/** Append a flag + value; a trailing '=' on the flag's last word glues the value on (`-c key=value`). */
+function appendFlagValue(args: string[], flag: string, value: string): void {
   const parts = parseArgField(flag);
   if (parts[parts.length - 1]?.endsWith('=')) {
-    parts[parts.length - 1] += sessionId;
+    parts[parts.length - 1] += value;
     args.push(...parts);
     return;
   }
 
-  args.push(...parts, sessionId);
+  args.push(...parts, value);
 }
 
 export function buildAgentCommand({
   providerId,
   providerConfig,
   autoApprove,
+  model,
+  reasoningEffort,
   initialPrompt,
   sessionId,
   sessionName,
@@ -115,6 +118,8 @@ export function buildAgentCommand({
   providerId: AgentProviderId;
   providerConfig: ProviderCustomConfig | undefined;
   autoApprove?: boolean;
+  model?: string;
+  reasoningEffort?: string;
   initialPrompt?: string;
   sessionId: string;
   sessionName?: string;
@@ -131,12 +136,12 @@ export function buildAgentCommand({
 
   if (isResuming && providerConfig?.resumeFlag) {
     if (providerConfig.sessionIdFlag) {
-      appendSessionId(args, providerConfig.resumeFlag, sessionId);
+      appendFlagValue(args, providerConfig.resumeFlag, sessionId);
     } else {
       args.push(...parseArgField(providerConfig.resumeFlag));
     }
   } else if (shouldPassSessionId) {
-    appendSessionId(args, sessionIdFlag, sessionId);
+    appendFlagValue(args, sessionIdFlag, sessionId);
   } else if (!isResuming && providerDef?.newConversationFlag) {
     args.push(providerDef.newConversationFlag);
   }
@@ -145,11 +150,22 @@ export function buildAgentCommand({
   // own UI. Composes with both fresh starts and --resume.
   const sessionNameValue = sessionName?.trim();
   if (providerDef?.sessionNameFlag && sessionNameValue) {
-    appendSessionId(args, providerDef.sessionNameFlag, sessionNameValue);
+    appendFlagValue(args, providerDef.sessionNameFlag, sessionNameValue);
   }
 
   if (autoApprove && providerConfig?.autoApproveFlag) {
     args.push(...parseArgField(providerConfig.autoApproveFlag));
+  }
+
+  // Per-conversation model/effort, passed on fresh starts and resumes alike so
+  // the choice sticks across app restarts.
+  const modelValue = model?.trim();
+  if (modelValue && providerConfig?.modelFlag) {
+    appendFlagValue(args, providerConfig.modelFlag, modelValue);
+  }
+  const effortValue = reasoningEffort?.trim();
+  if (effortValue && providerConfig?.reasoningEffortFlag) {
+    appendFlagValue(args, providerConfig.reasoningEffortFlag, effortValue);
   }
 
   if (
@@ -176,6 +192,8 @@ export function buildAgentSessionCommand(args: {
   providerId: AgentProviderId;
   providerConfig: ProviderCustomConfig | undefined;
   autoApprove?: boolean;
+  model?: string;
+  reasoningEffort?: string;
   initialPrompt?: string;
   sessionId: string;
   sessionName?: string;

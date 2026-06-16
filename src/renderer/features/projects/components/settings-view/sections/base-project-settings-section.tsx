@@ -1,5 +1,8 @@
 import { Folder } from 'lucide-react';
 import { useState } from 'react';
+import { OptionalValueSelect } from '@renderer/features/tasks/components/optional-value-select';
+import { buildSubscriptionOptions } from '@renderer/features/tasks/components/subscription-selection';
+import { useSubscriptionProfiles } from '@renderer/features/tasks/hooks/useSubscriptionProfiles';
 import { ProjectBranchSelector } from '@renderer/lib/components/project-branch-selector';
 import {
   RemoteSelectContent,
@@ -38,6 +41,7 @@ export function BaseProjectSettingsSection({
   worktreeDirectoryError,
   update,
 }: BaseProjectSettingsSectionProps) {
+  const { profiles: subscriptionProfiles } = useSubscriptionProfiles();
   const baseRemoteValue = form.baseRemote || 'origin';
   const pushRemoteValue = form.pushRemote || SAME_AS_BASE_REMOTE;
   const selectedBaseRemote = remotes.find((remote) => remote.name === baseRemoteValue);
@@ -179,6 +183,30 @@ export function BaseProjectSettingsSection({
         </div>
         <Switch checked={form.tmux} onCheckedChange={(checked) => update('tmux', checked)} />
       </Field>
+
+      {subscriptionProfiles.length > 0 || form.defaultSubscriptionId ? (
+        <>
+          <Separator />
+
+          <Field>
+            <FieldTitle>Default account</FieldTitle>
+            <FieldDescription className="text-foreground-muted">
+              Subscription account new tasks in this project start with. Can be changed per task.
+            </FieldDescription>
+            <div className="flex">
+              <OptionalValueSelect
+                label="Account"
+                value={form.defaultSubscriptionId || null}
+                options={buildSubscriptionOptions(
+                  subscriptionProfiles,
+                  form.defaultSubscriptionId || null
+                )}
+                onChange={(value) => update('defaultSubscriptionId', value ?? '')}
+              />
+            </div>
+          </Field>
+        </>
+      ) : null}
     </>
   );
 }

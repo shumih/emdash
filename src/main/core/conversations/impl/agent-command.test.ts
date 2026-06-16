@@ -224,6 +224,91 @@ describe('buildAgentCommand', () => {
     expect(result.args).toContain('Claude Sonnet');
   });
 
+  it('passes per-conversation model and effort via the provider flags', () => {
+    const result = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: providerConfigDefaults.claude,
+      model: 'opus',
+      reasoningEffort: 'high',
+      sessionId: 'conv-1',
+    });
+
+    expect(result.args).toEqual(['--session-id', 'conv-1', '--model', 'opus', '--effort', 'high']);
+  });
+
+  it('glues equals-style effort flags for Codex config overrides', () => {
+    const result = buildAgentCommand({
+      providerId: 'codex',
+      providerConfig: providerConfigDefaults.codex,
+      model: 'gpt-5.2-codex',
+      reasoningEffort: 'xhigh',
+      sessionId: 'conv-1',
+    });
+
+    expect(result.args).toEqual(['--model', 'gpt-5.2-codex', '-c', 'model_reasoning_effort=xhigh']);
+  });
+
+  it('keeps Codex model/effort after the resume subcommand (clap global flags)', () => {
+    // `codex resume` accepts `--model` and `-c` as global flags after the
+    // subcommand (verified against codex-cli 0.139.0). If this test breaks on
+    // a Codex upgrade, the flags must move before `resume` instead.
+    const result = buildAgentCommand({
+      providerId: 'codex',
+      providerConfig: providerConfigDefaults.codex,
+      model: 'gpt-5.2-codex',
+      reasoningEffort: 'high',
+      sessionId: 'conv-1',
+      isResuming: true,
+    });
+
+    expect(result.args).toEqual([
+      'resume',
+      '--last',
+      '--model',
+      'gpt-5.2-codex',
+      '-c',
+      'model_reasoning_effort=high',
+    ]);
+  });
+
+  it('keeps model and effort on resume so the choice survives restarts', () => {
+    const result = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: providerConfigDefaults.claude,
+      model: 'sonnet[1m]',
+      reasoningEffort: 'max',
+      sessionId: 'real-session-id',
+      isResuming: true,
+    });
+
+    expect(result.args).toEqual([
+      '--resume',
+      'real-session-id',
+      '--model',
+      'sonnet[1m]',
+      '--effort',
+      'max',
+    ]);
+  });
+
+  it('omits model and effort args when unset or unsupported by the provider', () => {
+    const unset = buildAgentCommand({
+      providerId: 'claude',
+      providerConfig: providerConfigDefaults.claude,
+      sessionId: 'conv-1',
+    });
+    expect(unset.args).toEqual(['--session-id', 'conv-1']);
+
+    const unsupported = buildAgentCommand({
+      providerId: 'amp',
+      providerConfig: { cli: 'amp' },
+      model: 'opus',
+      reasoningEffort: 'high',
+      sessionId: 'conv-1',
+    });
+    expect(unsupported.args).toEqual([]);
+  });
+
   it('labels a fresh session with the task name via the provider name flag', () => {
     const result = buildAgentCommand({
       providerId: 'claude',

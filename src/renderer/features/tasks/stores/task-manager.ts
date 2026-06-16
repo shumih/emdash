@@ -6,6 +6,7 @@ import type { RepositoryStore } from '@renderer/features/projects/stores/reposit
 import { events, rpc } from '@renderer/lib/ipc';
 import { viewStateCache } from '@renderer/lib/stores/view-state-cache';
 import { log } from '@renderer/utils/logger';
+import { traceUserAction } from '@renderer/utils/user-action-trace';
 import { prSyncProgressChannel, prUpdatedChannel } from '@shared/events/prEvents';
 import { taskProvisionProgressChannel, taskStatusUpdatedChannel } from '@shared/events/taskEvents';
 import type {
@@ -207,6 +208,13 @@ export class TaskManagerStore {
   }
 
   async createTask(params: CreateTaskParams) {
+    const span = traceUserAction('create-task', {
+      projectId: this.projectId,
+      taskId: params.id,
+      strategy: params.strategy.kind,
+      hasInitialConversation: Boolean(params.initialConversation),
+    });
+
     runInAction(() => {
       this.tasks.set(
         params.id,
@@ -221,6 +229,7 @@ export class TaskManagerStore {
         })
       );
     });
+    span.step('optimistic-insert');
 
     const sourceBranch = structuredClone(toJS(params.sourceBranch));
 
@@ -233,8 +242,10 @@ export class TaskManagerStore {
           current.errorMessage = message;
         }
       });
+      span.end({ status: 'error', failed_step: 'rpc-create-task', error: message });
       throw e;
     });
+    span.step('rpc-create-task');
 
     if (!result.success) {
       const message = formatCreateTaskError(result.error);
@@ -245,6 +256,7 @@ export class TaskManagerStore {
           current.errorMessage = message;
         }
       });
+      span.end({ status: 'error', failed_step: 'rpc-create-task-result', error: message });
       throw new Error(message);
     }
 
@@ -265,6 +277,7 @@ export class TaskManagerStore {
     }
 
     await this.provisionTask(params.id);
+    span.step('provision-task');
 
     if (params.initialConversation) {
       try {
@@ -272,14 +285,20 @@ export class TaskManagerStore {
           ...params.initialConversation,
           isInitialConversation: true,
         });
+        span.step('create-initial-conversation');
       } catch (error) {
         log.warn('TaskManagerStore: failed to create initial conversation after provision', {
           conversationId: params.initialConversation.id,
           taskId: params.id,
           error,
         });
+        span.step('create-initial-conversation', {
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
+
+    span.end({ status: 'ok' });
   }
 
   async provisionTask(taskId: string): Promise<void> {
@@ -308,6 +327,8 @@ export class TaskManagerStore {
     const task = this.tasks.get(taskId);
     if (!task || !isUnprovisioned(task)) return;
 
+    const span = traceUserAction('provision-task', { projectId: this.projectId, taskId });
+
     let resolution: Awaited<ReturnType<typeof rpc.workspaces.resolveBootstrap>>;
 
     runInAction(() => {
@@ -322,6 +343,7 @@ export class TaskManagerStore {
 
     try {
       resolution = await rpc.workspaces.resolveBootstrap({ projectId: this.projectId, taskId });
+      span.step('resolve-bootstrap', { kind: resolution.kind });
     } catch (err) {
       runInAction(() => {
         const current = this.tasks.get(taskId);
@@ -336,6 +358,11 @@ export class TaskManagerStore {
             });
           }
         }
+      });
+      span.end({
+        status: 'error',
+        failed_step: 'resolve-bootstrap',
+        error: err instanceof Error ? err.message : String(err),
       });
       throw err;
     }
@@ -354,12 +381,14 @@ export class TaskManagerStore {
           // phase stays 'provision' — the registry holds the resolution details
         }
       });
+      span.end({ status: 'needs-resolution', kind: resolution.kind });
       return;
     }
 
     if (resolution.kind === 'needs_create') {
       try {
         await rpc.workspaces.createWorktree({ projectId: this.projectId, taskId });
+        span.step('create-worktree');
       } catch (err) {
         runInAction(() => {
           const current = this.tasks.get(taskId);
@@ -368,11 +397,27 @@ export class TaskManagerStore {
             current.errorMessage = err instanceof Error ? err.message : String(err);
           }
         });
+        span.end({
+          status: 'error',
+          failed_step: 'create-worktree',
+          error: err instanceof Error ? err.message : String(err),
+        });
         throw err;
       }
     }
 
-    await this._finishProvision(taskId);
+    try {
+      await this._finishProvision(taskId);
+      span.step('finish-provision');
+      span.end({ status: 'ok' });
+    } catch (err) {
+      span.end({
+        status: 'error',
+        failed_step: 'finish-provision',
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
   }
 
   async continueProvision(

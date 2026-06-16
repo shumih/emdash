@@ -3,33 +3,23 @@ import {
   InitialConversationField,
   type InitialConversationState,
 } from './initial-conversation-section';
-import { PrPickerField } from './pr-picker-field';
 import { TaskNameField } from './task-name-field';
 import type { FromPullRequestModeState } from './use-from-pull-request-mode';
 
 interface FromPrContentProps {
   state: FromPullRequestModeState;
-  projectId?: string;
-  repositoryUrl?: string;
   disabled?: boolean;
   initialConversation: InitialConversationState;
 }
 
-export function FromPrContent({
-  state,
-  projectId,
-  repositoryUrl,
-  disabled,
-  initialConversation,
-}: FromPrContentProps) {
+/**
+ * Shown when the unified source field has a pull request selected. The PR
+ * card lives in the source field; this renders only checkout mode, name,
+ * and conversation fields.
+ */
+export function FromPrContent({ state, disabled, initialConversation }: FromPrContentProps) {
   return (
     <div className="flex flex-col gap-4">
-      <PrPickerField
-        state={state}
-        projectId={projectId}
-        repositoryUrl={repositoryUrl}
-        disabled={disabled}
-      />
       <CheckoutModeGroup
         value={state.checkoutMode}
         onValueChange={state.setCheckoutMode}
